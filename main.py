@@ -129,7 +129,7 @@ def seedInitWorkspace() -> dict:
 
         for week in range(5):
             snapDate = baseDate + timedelta(weeks=week)
-            if fID == "FARM_0001" and week == 4:
+            if fID == "FARM-0001" and week == 4:
                 red = genSpectralBand("stressed", "red")
                 nir = genSpectralBand("stressed", "nir")
             else:
