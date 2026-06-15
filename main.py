@@ -2,6 +2,7 @@ import sys
 from datetime import date, timedelta
 import numpy as np
 from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace
+from utils import displayTabSummary
 
 def dummyInitialDataTests():
     print("AgriSat Engine Testing")
@@ -70,7 +71,7 @@ def dummyInitialDataTests():
     for rowString in textGrid:
         print(rowString)
     
-def temporalSim():
+def temporalSimTest():
     testFarm = FarmWorkspace(
         farmID="FARM-0001",
         cropType="Rice",
@@ -110,4 +111,91 @@ def temporalSim():
 
 # dummyInitialDataTests()
 
-temporalSim()
+# temporalSimTest()
+
+def seedInitWorkspace() -> dict:
+    registry = {}
+    cropTypes = ["Rice", "Wheat", "Cotton"]
+
+    for i, crop in enumerate(cropTypes, 1):
+        fID = f"FARM-000{i}"
+        farm = FarmWorkspace(
+            farmID=fID,
+            cropType=crop,
+            geoBoundary=(34+i*0.01, -118.24, 34.06 + i*0.01, -118.23)
+        )
+
+        baseDate = date(2026, 5, 1)
+
+        for week in range(5):
+            snapDate = baseDate + timedelta(weeks=week)
+            if fID == "FARM_0001" and week == 4:
+                red = genSpectralBand("stressed", "red")
+                nir = genSpectralBand("stressed", "nir")
+            else:
+                red = genSpectralBand("healthy", "red")
+                nir = genSpectralBand("healthy", "nir")
+            
+            mask = genCloudMask(coverageProb=0.1)
+            farm.addTelemetrySnapshot(snapDate, red, nir, mask)
+        
+        registry[fID] = farm
+    return registry
+
+def runInteractiveDashboard():
+    farmDb = seedInitWorkspace()
+
+    print("\n" + "-" * 50)
+    print("          AGRISAT CONTROL ENGINE          ")
+    print("-" * 50)
+    print("[1]: View Registered Farms")
+    print("[2]: Run Satellite Diagnostic Scan")
+    print("[3] Generate Anomolous Stress Alerts")
+    print("[4]: Exit")
+    print("-" * 50)
+
+    while True:
+        while True:
+            userInput = int(input("Select which action to perform: "))
+
+            if userInput == 1 or userInput == 2 or userInput == 3 or userInput == 4:
+                break
+            else:
+                print("Please either choose 1, 2, 3 or 4!")
+                pass
+        
+        if userInput == 1:
+            uiList = []
+            for fID, fObj in farmDb.items():
+                uiList.append({
+                    "id": fObj.farmID,
+                    "crop": fObj.cropType,
+                    "bounds": f"{fObj.geoBoundary[0]}, {fObj.geoBoundary[1]}"
+                })
+            
+            displayTabSummary(uiList)
+            break
+        elif userInput == 2:
+            print("Coming soon :)")
+        
+        elif userInput == 3:
+            print("\nEvaluating Farm Profiles in Database and detecting anomolies...")
+            alertFound = False
+            for farmObj in farmDb.values():
+                activeAlerts = excludeAnomolies(farmObj)
+                for alert in activeAlerts:
+                    print(alert)
+                    alertFound = True
+            if not alertFound:
+                print("Everything is OK uptil now :)")
+            break
+        
+        elif userInput == 4:
+            print("Exiting :(")
+            sys.exit(0)
+        else:
+            print("Unidentified Input!")
+            break
+        
+    
+runInteractiveDashboard()
