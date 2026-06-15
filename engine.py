@@ -43,3 +43,39 @@ def genSpectralBand(condition: str, bandType: str, shape: Tuple[int, int] = (10,
     
 def genCloudMask(shape: Tuple[int, int] = (10, 10), coverageProb: float = 0.2) -> np.ndarray:
     return np.random.rand(*shape) < coverageProb
+
+
+def calculateNDVI(redBand: np.ndarray, nIRBand: np.ndarray, cloudMask: np.ndarray) -> np.ndarray:
+    ndviMatrix = np.full(redBand.shape, np.nan, dtype=float)
+    validPixels = ~cloudMask
+    redClear = redBand[validPixels]
+    nIRClear = nIRBand[validPixels]
+    denominators = nIRClear + redClear
+
+    zeroDivisonMask = denominators == 0.0
+
+    computedNDVI = np.zeros_like(denominators)
+
+    safePixels = ~zeroDivisonMask
+    computedNDVI[zeroDivisonMask] = 0.0
+
+    ndviMatrix[validPixels] = computedNDVI
+    return ndviMatrix
+
+
+def renderGridMask(ndviMatrix: np.ndarray) -> List[str]:
+    renderedRows = []
+    for row in ndviMatrix:
+        rowChars = []
+        for pixel in row:
+            if np.isnan(pixel):
+                rowChars.append("☁️")
+            elif pixel > 0.6:
+                rowChars.append("H")
+            elif pixel < 0.2:
+                rowChars.append(".")
+            else:
+                rowChars.append("m")
+        renderedRows.append(" ".join(rowChars))
+    
+    return renderedRows
