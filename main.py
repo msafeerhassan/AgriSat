@@ -1,7 +1,7 @@
 import sys
 from datetime import date, timedelta
 import numpy as np
-from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace
+from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap
 from utils import displayTabSummary
 
 def dummyInitialDataTests():
@@ -176,7 +176,35 @@ def runInteractiveDashboard():
             displayTabSummary(uiList)
             break
         elif userInput == 2:
-            print("Coming soon :)")
+            print("\nSelect target farm registry workspace: ")
+            availableIDs = list(farmDb.keys())
+            for idx, fId in enumerate(availableIDs, 1):
+                print(f"[{idx}]: {fId}")
+            
+            try:
+                userConsent = int(input("Enter choice number index: ")) - 1
+                if 0 <= userConsent < len(availableIDs):
+                    targetID = availableIDs[userConsent]
+                    farm = farmDb[targetID]
+
+                    latestDateStr = sorted(farm.redBands.keys())[-1]
+                    redArr = farm.redBands[latestDateStr]
+                    nirArr = farm.nIRbands[latestDateStr]
+                    maskArr = farm.cloudMask[latestDateStr]
+
+                    ndviMatrix = calculateNDVI(redArr, nirArr, maskArr)
+
+                    print(f"\n --- Visual Terminal Grid Map Preview ({targetID} | {latestDateStr}) --- ")
+                    textGrid = renderGridMask(ndviMatrix)
+
+                    for rowString in textGrid:
+                        print(rowString)
+                    
+                    exportNDVIHeatMap(ndviMatrix, farm.farmID)
+                else:
+                    print("Error!")
+            except (ValueError, IndexError):
+                print("Invaid Entry Sequence Parameter")
         
         elif userInput == 3:
             print("\nEvaluating Farm Profiles in Database and detecting anomolies...")

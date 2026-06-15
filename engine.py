@@ -3,6 +3,7 @@ from typing import List, Tuple, Dict, Optional
 import numpy as np
 from datetime import date
 import os, json
+import matplotlib.pyplot as plt
 
 @dataclass
 class FarmWorkspace:
@@ -141,3 +142,25 @@ def excludeAnomolies(farm: FarmWorkspace) -> List[str]:
                 alerts.append(f"Anomoly Detected at Farm: {farm.farmID}. Health Dropped by {dropPercentage * 100}% since {prevDate} till {currDate}")
     
     return alerts
+
+def exportNDVIHeatMap(ndviMatrix: np.ndarray, farmID: str, outputDir: str = "outputReports"):
+    if not os.path.exists(outputDir):
+        os.makedirs(outputDir)
+    
+    plt.figure(figsize=(6, 5))
+
+    currentCMap = plt.cm.YlGn.copy()
+    currentCMap.set_bad(color="darkgray")
+
+    img = plt.imshow(ndviMatrix, cmap=currentCMap, vmax=1.0, vmin=0.0)
+    plt.colorbar(img, label="NDVI Intesnity Index Value")
+
+    plt.title(f"AgriSat Satellite Performance Mapping: {farmID}")
+    plt.xlabel("Grid X-Axis Coordinate")
+    plt.ylabel("Grid Y-Axis Coordinate")
+
+    outputPath = os.path.join(outputDir, f"{farmID}HeatMap.png")
+    plt.savefig(outputPath, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    print(f"Graphical Map Generated and Saved at: {outputPath}")
