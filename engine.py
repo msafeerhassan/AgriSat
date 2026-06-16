@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Tuple, Dict, Optional
 import numpy as np
 from datetime import date
-import os, json
+import os, json, pickle
 import matplotlib.pyplot as plt
 
 @dataclass
@@ -98,13 +98,14 @@ def serializeFarmWorkspace(farm: FarmWorkspace, storageDir: str = "data_store"):
     with open(metaPath, "w") as f:
         json.dump(metaData, f, indent=4)
 
-    arrayPath = os.path.join(storageDir, f"{farm.farmID}_arrays.npz")
-    np.savez_compressed(
-        arrayPath,
-        redBands=farm.redBands,
-        nIRBands=farm.nIRbands,
-        cloudMasks = farm.cloudMask
-    )
+    arrayPath = os.path.join(storageDir, f"{farm.farmID}_arrays.pkl")
+
+    with open(arrayPath, "wb") as f:
+        pickle.dump({
+            "redBands": farm.redBands,
+            "nirBands": farm.nIRbands,
+            "cloudMasks": farm.cloudMask
+        }, f)
 
 def temporalTLSweeper(farm: FarmWorkspace) -> Dict[str, float]:
     temporalMeans = {}
@@ -164,3 +165,27 @@ def exportNDVIHeatMap(ndviMatrix: np.ndarray, farmID: str, outputDir: str = "out
     plt.close()
 
     print(f"Graphical Map Generated and Saved at: {outputPath}")
+
+def deserializeFarmWorkspace(farmID: str, storageDir: str = "data_store") -> Optional[FarmWorkspace]:
+    metaPath = os.path.join(storageDir, f"{farmID}_meta.json")
+    arrayPath = os.path.join(storageDir, f"{farmID}_arrays.pkl")
+
+    if not os.path.exists(metaPath) or not os.path.exists(arrayPath):
+        return None
+    with open(metaPath, "r") as file:
+        metaData = json.load(file)
+    
+    farm = FarmWorkspace(
+        farmID=metaData["farmID"],
+        cropType=metaData["cropType"],
+        geoBoundary=tuple(metaData["geoBoundary"])
+    )
+
+    farm.historicalDates = [date.fromisoformat(d) for d in metaData["historicalDates"]]
+
+    with open(arrayPath, "rb") as f:
+        arrays = pickle.load(f)
+        farm.redBands = arrays["redBands"]
+        farm.nIRbands = arrays["nirBands"]
+        farm.cloudMask = arrays["cloudMasks"]
+    return farm
