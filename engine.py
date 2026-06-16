@@ -189,3 +189,45 @@ def deserializeFarmWorkspace(farmID: str, storageDir: str = "data_store") -> Opt
         farm.nIRbands = arrays["nirBands"]
         farm.cloudMask = arrays["cloudMasks"]
     return farm
+
+def analyzeZSG(ndviMatrix: np.ndarray, quadrant: str) -> dict:
+    if quadrant.lower() == "nw":
+        rowStart, rowEnd, colStart, colEnd = 0, 5, 0, 5
+    elif quadrant.lower() == "ne":
+        rowStart, rowEnd, colStart, colEnd = 0, 5, 5, 10
+    elif quadrant.lower() == "sw":
+        rowStart, rowEnd, colStart, colEnd = 5, 10, 0, 5
+    elif quadrant.lower() == "se":
+        rowStart, rowEnd, colStart, colEnd = 5, 10, 5, 10
+    else: 
+        raise ValueError("Unknow orientations.")
+    
+    zonalSlice = ndviMatrix[rowStart:rowEnd, colStart:colEnd]
+
+    validPix = zonalSlice[~np.isnan(zonalSlice)]
+
+    if validPix.size == 0:
+        return {
+            "mean": 0.0,
+            "max": 0.0,
+            "min": 0.0,
+            "coverage_pct": 0.0,
+            "status": "Obscured (100% Cloud Cover)"
+        }
+    meanVal = float(np.mean(validPix))
+    coveragePct = (validPix.size / zonalSlice.size) * 100
+
+    if meanVal > 0.7:
+        status = "Excellent - High Biomass"
+    elif meanVal > 0.4:
+        status = "Moderate - Stable Development"
+    else:
+        status = "Critical - Low Vegetation Density"
+    
+    return {
+        "mean": meanVal,
+        "max": float(np.max(validPix)),
+        "min": float(np.min(validPix)),
+        "coverage_pct": coveragePct,
+        "status": status
+    }

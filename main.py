@@ -1,117 +1,8 @@
 import sys
 from datetime import date, timedelta
 import numpy as np
-from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace
+from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG
 from utils import displayTabSummary
-
-# def dummyInitialDataTests():
-#     print("AgriSat Engine Testing")
-#     print("-" * 30)
-
-#     testFarm = FarmWorkspace(
-#         farmID="FARM-0001",
-#         cropType="Rice",
-#         geoBoundary=(34.0522, -118.2437, 34.0622, -118.2337)
-#     )
-
-#     assert testFarm.farmID == "FARM-0001", "Fail: Farm ID isn't correct"
-#     assert testFarm.cropType == "Rice", "Fail: Crop Type is wrong"
-#     # print("Farm Object Initialized with correct strucutre")
-
-#     testShape = (10, 10)
-#     redSpectMatrix = genSpectralBand("healthy", "red", shape=testShape)
-
-#     assert isinstance(redSpectMatrix, np.ndarray), "Failed: Output isn't NumPy array"
-#     assert redSpectMatrix.shape == testShape , f"Output shape is {redSpectMatrix} instead of {testShape}"
-
-#     healthyRed = genSpectralBand("healthy", "red")
-#     healthyNIR = genSpectralBand("healthy", "nir")
-
-#     stressedRed = genSpectralBand("stressed", "red")
-#     stressedNIR = genSpectralBand("stressed", "nir")
-
-#     assert np.all((healthyRed >= 0.05) & (healthyRed <= 0.15)), "Failed: Healthy Red out of the expected bounds"
-#     assert np.all((healthyNIR >= 0.60) & (healthyNIR <= 0.85)), "Failed: Healthy NIR out the expectd bounds"
-#     assert np.all((stressedRed >= 0.60) & (stressedRed <= 0.85)), "Failed: Stressed Red out of expected boundary"
-#     assert np.all((stressedNIR >= 0.05) & (stressedNIR <= 0.15)), "Failed: Stressed NIR out of the expected bounds."
-
-#     cloudyMask = genCloudMask(shape=testShape, coverageProb=0.3)
-
-#     assert cloudyMask.dtype == bool, "Failed: It must be bool"
-#     assert cloudyMask.shape == testShape, "Failed: Cloud mask shape mismatched the expected"
-
-#     evaluationDate = date(2026, 6, 15)
-#     testFarm.addTelemetrySnapshot(
-#         snapShotDate=evaluationDate,
-#         redBands=healthyRed,
-#         nIRBands=healthyNIR,
-#         cloudMask=cloudyMask
-#     )
-
-#     dateKey = evaluationDate.isoformat()
-
-#     assert dateKey in testFarm.redBands, "Failed: Red Band save failed"
-#     assert dateKey in testFarm.cloudMask, "Cloud mask save failed"
-
-#     # print("All tests passed ig")
-
-#     ndviResult = calculateNDVI(healthyRed, healthyNIR, cloudyMask)
-
-#     assert ndviResult.shape == testShape, "Failed: NDVI Matrix mismatch in the shape"
-#     nanLocations = np.isnan(ndviResult)
-
-#     assert np.array_equal(nanLocations, cloudyMask), "Failed: Cloud masks not mapped to NaN entries"
-
-#     clearHealthyValues = ndviResult[~cloudyMask]
-#     if clearHealthyValues.size > 0:
-#         assert np.all(clearHealthyValues > 0.5), "Failed: Healthy crop yeild low NDVi score"
-
-#     print("Terminal Grid Preview")
-#     textGrid = renderGridMask(ndviResult)
-#     for rowString in textGrid:
-#         print(rowString)
-    
-# def temporalSimTest():
-#     testFarm = FarmWorkspace(
-#         farmID="FARM-0001",
-#         cropType="Rice",
-#         geoBoundary=(34.0522, -118.2437, 34.0622, -118.2337)
-#     )
-#     baseDate = date(2026, 5, 1)
-
-#     for week in range(5):
-#         snapShotDate = baseDate + timedelta(weeks=week)
-
-#         if week == 4:
-#             red = genSpectralBand("stressed", "red")
-#             nir = genSpectralBand("stressed", "nir")
-#         else: 
-#             red = genSpectralBand("healthy", "red")
-#             nir = genSpectralBand("healthy", "nir")
-        
-#         mask = genCloudMask(coverageProb=0.15)
-#         testFarm.addTelemetrySnapshot(snapShotDate, red, nir, mask)
-
-#     serializeFarmWorkspace(testFarm)
-#     print("data stored")
-
-#     weeklyMeans = temporalTLSweeper(testFarm)
-#     for dateStr, meanValue in weeklyMeans.items():
-#         print(f"Week {dateStr}: Mean NDVI: {meanValue:.4f}")
-    
-#     activeAlarms = excludeAnomolies(testFarm)
-
-#     for alarm in activeAlarms:
-#         print(alarm)
-
-
-    
-#     assert len(activeAlarms) > 0, "Error: Engine didn't flagged suspected issues"
-
-
-# dummyInitialDataTests()
-
-# temporalSimTest()
 
 def seedInitWorkspace() -> dict:
     registry = {}
@@ -168,12 +59,14 @@ def runInteractiveDashboard():
         print("[2]: Run Satellite Diagnostic Scan")
         print("[3]: Generate Anomolous Stress Alerts")
         print("[4]: Upload Real-Time Satellite Telemetry")
+        print("[5]: Perform Spatial Zonal Diagnostics")
+        print("[6]: Exit :(")
         print("-" * 50)
         try:
             userInput = int(input("Select which action to perform: "))
 
-            if userInput != 1 and userInput != 2 and userInput != 3 and userInput != 4 and userInput != 5:
-                print("Please either choose 1, 2, 3, 4 or 5!")
+            if userInput != 1 and userInput != 2 and userInput != 3 and userInput != 4 and userInput != 5 and userInput != 6:
+                print("Please either choose 1, 2, 3, 4, 5 or 6!")
                 continue
         except ValueError:
             print("Invalid Entry.")
@@ -274,6 +167,72 @@ def runInteractiveDashboard():
             except ValueError:
                 print("Invalid Entry!")
         elif userInput == 5:
+            print("\nSelect target farm: ")
+            availableIDs = list(farmDb.keys())
+            for idx, Fid in enumerate(availableIDs, 1):
+                print(f"[{idx}: {Fid}]")
+            
+            try:
+                farmChoice = int(input("Enter the farm index to continue with: ")) - 1
+                if not (0 <= farmChoice < len(availableIDs)):
+                    print("Out of Range :)")
+                    continue
+                targetID = availableIDs[farmChoice]
+                farm = farmDb[targetID]
+
+                print(f"\nSelect target date: ")
+                availableDates = sorted(list(farm.redBands.keys()))
+                for idx, dstr in enumerate(availableDates, 1):
+                    print(f"[{idx}]: [{dstr}]")
+
+                dateChoice = int(input("Enter choice index: ")) - 1
+
+                if not (0 <= dateChoice < len(availableDates)):
+                    print("Out of range")
+                    continue
+                targetDateStr = availableDates[dateChoice]
+
+                ndviMatrix = calculateNDVI(
+                    farm.redBands[targetDateStr],
+                    farm.nIRbands[targetDateStr],
+                    farm.cloudMask[targetDateStr]
+                )
+
+                print("\nSelect target sector location: ")
+                print("1. Northwest")
+                print("2. Northeast")
+                print("3. Southwest")
+                print("4. Southeast")
+                quadCode = int(input("Enter Sector index: "))
+
+                if quadCode != 1 and quadCode !=2 and quadCode != 3 and quadCode != 4:
+                    print("Wrong Selection")
+                    continue
+                
+                if quadCode == 1:
+                    quadCode = "NW"
+                elif quadCode == 2:
+                    quadCode = "NE"
+                elif quadCode == 3:
+                    quadCode = "SW"
+                elif quadCode == 4:
+                    quadCode = "SE"
+                
+                stats = analyzeZSG(ndviMatrix, quadCode)
+
+                print(f"\n" + "-" * 45)
+                print(f"Spatial Analysis Report: {targetID} ({quadCode})")
+                print(f"Timestmap: {targetDateStr}")
+                print("-" * 45)
+                print(f"Status: {stats['status']}")
+                print(f"Mean NDVI: {stats['mean']:.4f}")
+                print(f"Maximum NDVI: {stats['max']:.4f}")
+                print(f"Minimum NDVI: {stats['min']:.4f}")
+                print(f"Valid Data Coverage: {stats['coverage_pct']:.1f}%")
+                print("-" * 45)
+            except ValueError:
+                print("Format Error")
+        else:
             print("Exiting :(")
             sys.exit(0)
     
