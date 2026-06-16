@@ -166,14 +166,14 @@ def runInteractiveDashboard():
         print("-" * 50)
         print("[1]: View Registered Farms")
         print("[2]: Run Satellite Diagnostic Scan")
-        print("[3] Generate Anomolous Stress Alerts")
-        print("[4]: Exit")
+        print("[3]: Generate Anomolous Stress Alerts")
+        print("[4]: Upload Real-Time Satellite Telemetry")
         print("-" * 50)
         try:
             userInput = int(input("Select which action to perform: "))
 
-            if userInput != 1 and userInput != 2 and userInput != 3 and userInput != 4:
-                print("Please either choose 1, 2, 3 or 4!")
+            if userInput != 1 and userInput != 2 and userInput != 3 and userInput != 4 and userInput != 5:
+                print("Please either choose 1, 2, 3, 4 or 5!")
                 continue
         except ValueError:
             print("Invalid Entry.")
@@ -233,9 +233,48 @@ def runInteractiveDashboard():
                 print("Everything is OK uptil now :)")
         
         elif userInput == 4:
+            print("\nSelect target farm profile to append the telemtry Data: ")
+            availableIDs = list(farmDb.keys())
+            for idx, fId in enumerate(availableIDs, 1):
+                print(f"[{idx}: {fId}]")
+            
+            try:
+                farmChoice = int(input("Enter the farm index to continue with: ")) - 1
+                if not (0 <= farmChoice < len(availableIDs)):
+                    print("Out of Range :)")
+                    continue
+                targetID = availableIDs[farmChoice]
+                selectedFarm = farmDb[targetID]
+
+                print(f"\nEnter the date for new snapshots insertion: ")
+                year = int(input("Enter year: "))
+                month = int(input("Enter Month: "))
+                day = int(input("Enter day"))
+                inputDate = date(year, month, day)
+
+                if inputDate.isoformat() in selectedFarm.redBands:
+                    print(f"Matrix Data already present for {inputDate.isoformat()}.")
+                    continue
+
+                print("\nSelect crop health status: ")
+                print("[1]: Optimally Healthy Vegetation")
+                print("[2]: Environmental Stress")
+                condChoice = int(input("Select 1 or 2:"))
+
+                conditionStr = "healthy" if condChoice == 1 else "stressed"
+
+                redMatrix = genSpectralBand(conditionStr, "red")
+                nirMatrix = genSpectralBand(conditionStr, "nir")
+                cloudMatrix = genCloudMask(coverageProb=0.12)
+
+                selectedFarm.addTelemetrySnapshot(inputDate, redMatrix, nirMatrix, cloudMatrix)
+
+                serializeFarmWorkspace(selectedFarm)
+                print(f"Telemetry Snapshot for {inputDate.isoformat()} successfully added")
+            except ValueError:
+                print("Invalid Entry!")
+        elif userInput == 5:
             print("Exiting :(")
             sys.exit(0)
-        else:
-            print("Unidentified Input!")        
     
 runInteractiveDashboard()
