@@ -269,3 +269,55 @@ def genHistoricalRep(farm: FarmWorkspace) -> Dict:
         "trend_vector": trendVector,
         "assessment": assesment
     }
+
+def exportDetailedFarmReport(farm: FarmWorkspace, trendReport: dict, zonalReport: dict, quadCode: str, outputDir: str = "outputReports") -> str:
+    if not os.path.exists(outputDir):
+        os.makedirs(outputDir)
+
+    basePath = os.path.join(outputDir, f"{farm.farmID}_Summary")
+    jsonPayload = {
+        "farmID": farm.farmID,
+        "cropType": farm.cropType,
+        "coordinates": farm.geoBoundary,
+        "temporalTrends": {
+            "monitored_dates": trendReport["dates"],
+            "historical_means": trendReport["means"],
+            "seasonal_slope": float(trendReport["overall_slope"]),
+            "trajectory_assessment": trendReport["assessment"]
+        },
+        "spatial_zone_analysis": {
+            "analyzed_sector": quadCode,
+            "mean_ndvi": zonalReport["mean"],
+            "max_ndvi": zonalReport["max"],
+            "min_ndvi": zonalReport["min"],
+            "data_coverage_pct": zonalReport["coverage_pct"],
+            "sector_status": zonalReport["status"]
+        },
+        "compiled_timestamp": date.today().isoformat()
+    }
+
+    with open(f"{basePath}.json", "w") as file:
+        json.dump(jsonPayload, file, indent=4)
+
+    with open(f"{basePath}.txt", "w", encoding="utf-8") as tf:
+        tf.write("-" * 50 + "\n")
+        tf.write(f"           AgriSat Comprehensive Telemtry Report          \n")
+        tf.write("-" * 50 + "\n")
+        tf.write(f"Target Farm ID: {farm.farmID}\n")
+        tf.write(f"Crop: {farm.cropType}\n")
+        tf.write(f"Geo Boundary: {farm.geoBoundary}\n")
+        tf.write(f"Report Generated at: {date.today().isoformat()}\n")
+        tf.write("-" * 50 + "\n")
+        tf.write(f"Assessment: {trendReport['assessment']}\n")
+        tf.write(f"Net Slope: {trendReport['overall_slope']:.4f}\n")
+        tf.write(f"Trend Vector: {trendReport['trend_vector']}\n")
+        tf.write("-" * 60 + "\n")
+        tf.write(f"Spatial Grid Diagnostic: ({quadCode})\n")
+        tf.write(f"Sector Status: {zonalReport['status']}\n")
+        tf.write(f"Mean NDVI: {zonalReport['mean']:.4f}\n")
+        tf.write(f"Peak NDVI: {zonalReport['max']:.4f}\n")
+        tf.write(f"Lowest NDVI: {zonalReport['min']:.4f}\n")
+        tf.write(f"Valid Pixels: {zonalReport['coverage_pct']:.1f}%\n")
+        tf.write("-" * 50 +"\n")
+        tf.write("End of Generated Satellite Telemetry Document Summary. \n")
+    return basePath

@@ -1,7 +1,7 @@
 import sys
 from datetime import date, timedelta
 import numpy as np
-from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep
+from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport
 from utils import displayTabSummary
 
 def seedInitWorkspace() -> dict:
@@ -61,13 +61,14 @@ def runInteractiveDashboard():
         print("[4]: Upload Real-Time Satellite Telemetry")
         print("[5]: Perform Spatial Zonal Diagnostics")
         print("[6]: Analyze Historical Trends")
-        print("[7]: Exit :(")
+        print("[7]: Export Analytics Reports")
+        print("[8]: Exit :(")
         print("-" * 50)
         try:
             userInput = int(input("Select which action to perform: "))
 
-            if userInput != 1 and userInput != 2 and userInput != 3 and userInput != 4 and userInput != 5 and userInput != 6 and userInput != 7:
-                print("Please either choose 1, 2, 3, 4, 5, 6 or 7!")
+            if userInput != 1 and userInput != 2 and userInput != 3 and userInput != 4 and userInput != 5 and userInput != 6 and userInput != 7 and userInput != 8:
+                print("Please either choose 1, 2, 3, 4, 5, 6, 7 or 8!")
                 continue
         except ValueError:
             print("Invalid Entry.")
@@ -263,6 +264,39 @@ def runInteractiveDashboard():
                 for d, m in zip(report['dates'], report['means']):
                     print(f"{d} Average NDVI: {m:.4f}")
                 
+                print("-" * 50)
+            except ValueError:
+                print("Error")
+        elif userInput == 7:
+            print("\nSelect target farm profile to append the telemtry Data: ")
+            availableIDs = list(farmDb.keys())
+            for idx, fId in enumerate(availableIDs, 1):
+                print(f"[{idx}: {fId}]")
+            
+            try:
+                farmChoice = int(input("Enter the farm index to continue with: ")) - 1
+                if not (0 <= farmChoice < len(availableIDs)):
+                    print("Out of Range :)")
+                    continue
+                targetID = availableIDs[farmChoice]
+                farm = farmDb[targetID]
+
+                trendReport = genHistoricalRep(farm)
+                latestDateStr = sorted(farm.redBands.keys())[-1]
+
+                ndviMatrix = calculateNDVI(farm.redBands[latestDateStr], farm.nIRbands[latestDateStr], farm.cloudMask[latestDateStr])
+
+                quadCode = "NW"
+                zonalRep = analyzeZSG(ndviMatrix, quadCode)
+
+                savedPathBase = exportDetailedFarmReport(farm, trendReport, zonalRep, quadCode)
+
+                print(f"\n" + "-" * 50)
+                print(f"           Report Exported Successfully!")
+                print("-" * 50)
+                print(f"Raw Data saved at {savedPathBase}.json")
+                print(f"Executive Briefing Saved at: {savedPathBase}.txt")
+                print(f"Saved Reports into 'outputReports/' folder")
                 print("-" * 50)
             except ValueError:
                 print("Error")

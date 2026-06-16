@@ -1,0 +1,19 @@
+--------------------------------------------------
+           AgriSat Comprehensive Telemtry Report          
+--------------------------------------------------
+Target Farm ID: FARM-0001
+Crop: Rice
+Geo Boundary: (34.01, -118.24, 34.07, -118.23)
+Report Generated at: 2026-06-16
+--------------------------------------------------
+Assessment: Stable!
+Net Slope: 0.0093
+Trend Vector: 0.76Stable (0.15Stable (0.76Stable (0.75Stable (0.76Stable (0.14Stable (0.77)
+------------------------------------------------------------
+Spatial Grid Diagnostic: (NW)
+Sector Status: Excellent - High Biomass
+Mean NDVI: 0.7738Peak NDVI: 0.8743
+Lowest NDVI: 0.6628
+Valid Pixels: 88.0%
+--------------------------------------------------
+End of Generated Satellite Telemetry Document Summary. 

@@ -1,0 +1,41 @@
+{
+    "farmID": "FARM-0001",
+    "cropType": "Rice",
+    "coordinates": [
+        34.01,
+        -118.24,
+        34.07,
+        -118.23
+    ],
+    "temporalTrends": {
+        "monitored_dates": [
+            "2026-05-01",
+            "2026-05-04",
+            "2026-05-08",
+            "2026-05-15",
+            "2026-05-22",
+            "2026-05-29",
+            "2026-07-01"
+        ],
+        "historical_means": [
+            0.760182043987121,
+            0.14503488387715144,
+            0.759495622084736,
+            0.7492609546438402,
+            0.7584145994570597,
+            0.1412610270179745,
+            0.7694421472740391
+        ],
+        "seasonal_slope": 0.009260103286918175,
+        "trajectory_assessment": "Stable!"
+    },
+    "spatial_zone_analysis": {
+        "analyzed_sector": "NW",
+        "mean_ndvi": 0.7737725717136406,
+        "max_ndvi": 0.8743158042153552,
+        "min_ndvi": 0.6627844462466478,
+        "data_coverage_pct": 88.0,
+        "sector_status": "Excellent - High Biomass"
+    },
+    "compiled_timestamp": "2026-06-16"
+}
