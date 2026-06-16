@@ -231,3 +231,41 @@ def analyzeZSG(ndviMatrix: np.ndarray, quadrant: str) -> dict:
         "coverage_pct": coveragePct,
         "status": status
     }
+
+def genHistoricalRep(farm: FarmWorkspace) -> Dict:
+    meansTL = temporalTLSweeper(farm)
+    sortedDates = sorted(meansTL.keys())
+
+    if len(sortedDates) < 2:
+        return {
+            "dates": sortedDates,
+            "means": [meansTL.get(d, 0,0) for d in sortedDates],
+            "overall_slope": 0.0,
+            "trend_vector": "Insufficient Data Sequence",
+            "assessment": "Need atleast 2 historical frames to evaluate trends"
+        }
+    meansList = [meansTL[d] for d in sortedDates]
+
+    slopes = []
+    for i in range(1, len(meansList)):
+        slopes.append(meansList[i] - meansList[i-1])
+
+    overallSlope = meansList[-1] - meansList[0]
+
+    if overallSlope > 0.15:
+        assesment = "Growth!"
+        trendVector = "📈 Upward Growth (".join([f"{m:.2f}" for m in meansList]) + ")"
+    elif overallSlope <-0.15:
+        assesment = "Decline!"
+        trendVector = "📉 Downward Growth (".join([f"{m:.2f}" for m in meansList]) + ")"
+    else:
+        assesment = "Stable!"
+        trendVector = "Stable (".join([f"{m:.2f}" for m in meansList]) + ")"
+    
+    return {
+        "dates": sortedDates,
+        "means": meansList,
+        "overall_slope": overallSlope,
+        "trend_vector": trendVector,
+        "assessment": assesment
+    }
