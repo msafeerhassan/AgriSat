@@ -4,6 +4,7 @@ import numpy as np
 from datetime import date
 import os, json, pickle
 import matplotlib.pyplot as plt
+from sentinelhub import SHConfig
 
 @dataclass
 class FarmWorkspace:
@@ -321,3 +322,23 @@ def exportDetailedFarmReport(farm: FarmWorkspace, trendReport: dict, zonalReport
         tf.write("-" * 50 +"\n")
         tf.write("End of Generated Satellite Telemetry Document Summary. \n")
     return basePath
+
+def verifySentinelCredentials() -> bool:
+    clientID = os.getenv("CLIENT_ID")
+    clientSecret = os.getenv("CLIENT_SECRET")
+
+    if not clientID or not clientSecret:
+        print("\n Credentials Missing :(")
+        return False
+
+    try:
+        config = SHConfig()
+        config.sh_client_id = clientID
+        config.sh_client_secret = clientSecret
+
+        if config.sh_client_id and config.sh_client_secret:
+            print("Sentinel Hub SDK Config Initialized")
+            return True
+    except Exception as e:
+        print(f"Error in Sentinel Hub Credentials Initialization: {e}")
+        return False

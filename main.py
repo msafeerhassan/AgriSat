@@ -1,8 +1,11 @@
-import sys
+import sys, os
 from datetime import date, timedelta
 import numpy as np
-from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport
+from dotenv import load_dotenv
+from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport, verifySentinelCredentials
 from utils import displayTabSummary
+
+load_dotenv()
 
 def seedInitWorkspace() -> dict:
     registry = {}
@@ -75,6 +78,7 @@ def runInteractiveDashboard():
             continue
         
         if userInput == 1:
+            verifySentinelCredentials()
             uiList = []
             for fID, fObj in farmDb.items():
                 uiList.append({
