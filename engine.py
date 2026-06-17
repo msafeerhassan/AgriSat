@@ -51,7 +51,6 @@ def genSpectralBand(condition: str, bandType: str, shape: Tuple[int, int] = (10,
 def genCloudMask(shape: Tuple[int, int] = (10, 10), coverageProb: float = 0.2) -> np.ndarray:
     return np.random.rand(*shape) < coverageProb
 
-
 def calculateNDVI(redBand: np.ndarray, nIRBand: np.ndarray, cloudMask: np.ndarray) -> np.ndarray:
     ndviMatrix = np.full(redBand.shape, np.nan, dtype=float)
     validPixels = ~cloudMask
@@ -69,7 +68,6 @@ def calculateNDVI(redBand: np.ndarray, nIRBand: np.ndarray, cloudMask: np.ndarra
 
     ndviMatrix[validPixels] = computedNDVI
     return ndviMatrix
-
 
 def renderGridMask(ndviMatrix: np.ndarray) -> List[str]:
     renderedRows = []
@@ -174,7 +172,6 @@ def exportNDVIHeatMap(farmID:str, targetDateStr: str, ndviMatrix:np.ndarray, out
         print(f"Matplotlib Error: {e}")
         return None
 
-
 def deserializeFarmWorkspace(farmID: str, storageDir: str = "data_store") -> Optional[FarmWorkspace]:
     metaPath = os.path.join(storageDir, f"{farmID}_meta.json")
     arrayPath = os.path.join(storageDir, f"{farmID}_arrays.pkl")
@@ -254,13 +251,15 @@ def genHistoricalRep(farm: FarmWorkspace) -> Dict:
         valid = ndvi[~np.isnan(ndvi)]
         ndviMeans.append(float(np.mean(valid)) if valid.size > 0 else 0.0)
 
-    xVals = np.arange(len(ndviMeans))
+    cleanNDVIMeans = smoothenTemporalNDVI(ndviMeans, windowSize=3)
 
-    slope, _ = np.polyfit(xVals, ndviMeans, 1)
+    xVals = np.arange(len(cleanNDVIMeans))
+
+    slope, _ = np.polyfit(xVals, cleanNDVIMeans, 1)
 
     vectorSegments = []
 
-    for val in ndviMeans:
+    for val in cleanNDVIMeans:
         vectorSegments.append(f"{val:.2f}")
 
     if slope > 0.02:
@@ -517,3 +516,18 @@ def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, targetDate: date)
     except Exception as apiExecErr:
         print(f"Error: {apiExecErr}")
         return False
+    
+def smoothenTemporalNDVI(rawMeans: List[float], windowSize: int = 3) -> List[float]:
+    if len(rawMeans) < windowSize:
+        return rawMeans
+
+    smoothedList = []
+    extendedBounds = windowSize // 2
+
+    paddedData = np.pad(rawMeans, extendedBounds, mode='edge')
+
+    for i in range(len(rawMeans)):
+        windowSlice = paddedData[i : i + windowSize]
+        smoothedList.append(float(np.mean(windowSlice)))
+    
+    return smoothedList

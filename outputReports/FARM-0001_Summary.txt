@@ -6,8 +6,8 @@ Crop: Rice
 Geo Boundary: (34.01, -118.24, 34.07, -118.23)
 Report Generated at: 2026-06-17
 --------------------------------------------------
-Vector Trajectory: Downwards Growth (0.76 -> 0.75 -> 0.00 -> 0.75 -> 0.75 -> 0.14)
-Net Slope: -0.067003
+Vector Trajectory: Downwards Growth (0.76 -> 0.50 -> 0.50 -> 0.50 -> 0.55 -> 0.34)
+Net Slope: -0.055107
 Health Assessment: Decline
 --------------------------------------------------
 Spatial Grid Diagnostic

@@ -9,8 +9,8 @@
     },
     "temporalTrends": {
         "assessment": "Decline",
-        "overall_slope": -0.06700297491571378,
-        "trend_vector": "Downwards Growth (0.76 -> 0.75 -> 0.00 -> 0.75 -> 0.75 -> 0.14)"
+        "overall_slope": -0.055107217991142016,
+        "trend_vector": "Downwards Growth (0.76 -> 0.50 -> 0.50 -> 0.50 -> 0.55 -> 0.34)"
     },
     "spatial_zones": {
         "NW": {
