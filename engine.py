@@ -396,21 +396,16 @@ def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date) -> SentinelHubRequ
     }
 
     function evalPixel(sample){
-        retunr [sample.B04, sample.B08, sample.SCL]
+        return [sample.B04, sample.B08, sample.SCL]
     }
     """
     request = SentinelHubRequest(
         evalscript=evalScriptPayLoad,
         input_data=[
-            {
-                "dataFilter": {
-                    "dataCollection": DataCollection.SENTINEL2_L2A,
-                    "timeRange": {
-                        "from": f"{targetDate.isoformat()}T00:00:00Z",
-                        "to": f"{targetDate.isoformat()}T23:59:59Z"
-                    }
-                }
-            }
+            SentinelHubRequest.input_data(
+                data_collection=DataCollection.SENTINEL2_L2A,
+                time_interval=(f"{targetDate.isoformat()}T00:00:00Z", f"{targetDate.isoformat()}T23:59:59Z")
+            )
         ],
         responses=[
             SentinelHubRequest.output_response('default', MimeType.TIFF)
@@ -493,3 +488,28 @@ def verifyMatrixReshaping() -> bool:
         print(f"Execution Failed: {e}")
         return False
 
+def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, targetDate: date) -> bool:
+    print(f"LIVE API REQUEST: Contacting Sentinel Hub for {farm.farmID} ({targetDate.isoformat()})")
+
+    try:
+        request = genSentinelNDVIReq(farm, targetDate)
+
+        rawDownloadDataList = request.get_data()
+
+        if not rawDownloadDataList or len(rawDownloadDataList) == 0:
+            print("No Imagery Found for this")
+            return False
+        
+        rawImageryMatrix = np.array(rawDownloadDataList[0])
+
+        normRed, normNir, cloudMask = processSatelliteResponseMatrix(rawImageryMatrix, targetShape=(10, 10))
+
+        farm.addTelemetrySnapshot(targetDate, normRed, normNir, cloudMask)
+
+        serializeFarmWorkspace(farm)
+
+        print(f"Telemetry Data Successfuly Commited to database of {farm.farmID}")
+        return True
+    except Exception as apiExecErr:
+        print(f"Error: {apiExecErr}")
+        return False

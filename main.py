@@ -2,10 +2,12 @@ import sys, os
 from datetime import date, timedelta
 import numpy as np
 from dotenv import load_dotenv
-from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport, verifySentinelCredentials, genSentinelNDVIReq, verifyAPIConnectionMock, verifyMatrixReshaping, processSatelliteResponseMatrix
+from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport, verifySentinelCredentials, genSentinelNDVIReq, verifyAPIConnectionMock, verifyMatrixReshaping, downloadAndRegisterSatelliteTelemetry
 from utils import displayTabSummary
 
 load_dotenv()
+
+print(os.getenv("CLIENT_ID"))
 
 def seedInitWorkspace() -> dict:
     registry = {}
@@ -165,21 +167,32 @@ def runInteractiveDashboard():
                     print(f"Matrix Data already present for {inputDate.isoformat()}.")
                     continue
 
-                print("\nSelect crop health status: ")
-                print("[1]: Optimally Healthy Vegetation")
-                print("[2]: Environmental Stress")
-                condChoice = int(input("Select 1 or 2:"))
+                print("\nChoose Telemetry Data Intake Source: ")
+                print("[1]: Download Live Sentinel-2 Satellite Telemetry")
+                print("[2]: Use Mock Simulation")
+                dataSourceChoice = int(input("Select 1 or 2: "))
 
-                conditionStr = "healthy" if condChoice == 1 else "stressed"
+                if dataSourceChoice == 1:
+                    success = downloadAndRegisterSatelliteTelemetry(selectedFarm, inputDate)
+                    if not success:
+                        print("Failed fetching satellite data.")
+                        continue
+                else:
+                    print("\nSelect crop health status: ")
+                    print("[1]: Optimally Healthy Vegetation")
+                    print("[2]: Environmental Stress")
+                    condChoice = int(input("Select 1 or 2:"))
 
-                redMatrix = genSpectralBand(conditionStr, "red")
-                nirMatrix = genSpectralBand(conditionStr, "nir")
-                cloudMatrix = genCloudMask(coverageProb=0.12)
+                    conditionStr = "healthy" if condChoice == 1 else "stressed"
 
-                selectedFarm.addTelemetrySnapshot(inputDate, redMatrix, nirMatrix, cloudMatrix)
+                    redMatrix = genSpectralBand(conditionStr, "red")
+                    nirMatrix = genSpectralBand(conditionStr, "nir")
+                    cloudMatrix = genCloudMask(coverageProb=0.12)
 
-                serializeFarmWorkspace(selectedFarm)
-                print(f"Telemetry Snapshot for {inputDate.isoformat()} successfully added")
+                    selectedFarm.addTelemetrySnapshot(inputDate, redMatrix, nirMatrix, cloudMatrix)
+
+                    serializeFarmWorkspace(selectedFarm)
+                    print(f"Telemetry Snapshot for {inputDate.isoformat()} successfully added")
             except ValueError:
                 print("Invalid Entry!")
         elif userInput == 5:
