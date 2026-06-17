@@ -2,7 +2,7 @@ import sys, os
 from datetime import date, timedelta
 import numpy as np
 from dotenv import load_dotenv
-from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport, verifySentinelCredentials
+from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport, verifySentinelCredentials, genSentinelNDVIReq, verifyAPIConnectionMock, verifyMatrixReshaping, processSatelliteResponseMatrix
 from utils import displayTabSummary
 
 load_dotenv()
@@ -78,9 +78,19 @@ def runInteractiveDashboard():
             continue
         
         if userInput == 1:
+            verifyMatrixReshaping()
+
             verifySentinelCredentials()
+
+            print("\nRunning Geospatial Validation Test")
             uiList = []
             for fID, fObj in farmDb.items():
+                try:
+                    spatialMeta = fObj.getValidatedBounds()
+                    print(f"Valid {fID}: {spatialMeta['crs']} | {spatialMeta['area_deg_sq']:.6f} sq deg.")
+                    verifyAPIConnectionMock(fObj)
+                except Exception as geoErr:
+                    print(f"Error: {geoErr}")
                 uiList.append({
                     "id": fObj.farmID,
                     "crop": fObj.cropType,

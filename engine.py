@@ -4,7 +4,8 @@ import numpy as np
 from datetime import date
 import os, json, pickle
 import matplotlib.pyplot as plt
-from sentinelhub import SHConfig
+from sentinelhub import SHConfig, SentinelHubRequest, DataCollection, BBox, CRS, MimeType
+from shapely.geometry import box, polygon
 
 @dataclass
 class FarmWorkspace:
@@ -16,6 +17,9 @@ class FarmWorkspace:
     redBands: Dict[str, np.ndarray] = field(default_factory=dict, repr=False)
     nIRbands: Dict[str, np.ndarray] = field(default_factory=dict, repr=False)
     cloudMask: Dict[str, np.ndarray] = field(default_factory=dict, repr=False)
+
+    def getValidatedBounds(self) -> dict:
+        return validateAndStandardizeBBox(self.geoBoundary)
 
     def addTelemetrySnapshot(self, snapShotDate: date, redBands: np.ndarray, nIRBands: np.ndarray, cloudMask: np.ndarray):
         dateStr = snapShotDate.isoformat()
@@ -342,3 +346,150 @@ def verifySentinelCredentials() -> bool:
     except Exception as e:
         print(f"Error in Sentinel Hub Credentials Initialization: {e}")
         return False
+
+def validateAndStandardizeBBox(bboxTuple: Tuple[float, float, float, float] , crsFormat: str = "EPSG:4326") -> dict:
+    if len(bboxTuple) != 4:
+        raise ValueError("Geospatial Boundaries are supposed to be 4-tuple sequence of floats")
+
+    minX, minY, maxX, maxY = bboxTuple
+
+    if minX >= maxX or minY >= maxY:
+        raise ValueError(f"Invalid Bounding Box Dimensions : {bboxTuple}")
+    
+    spatialEnv = box(minX, minY, maxX, maxY)
+
+    if not spatialEnv.is_valid or spatialEnv.is_empty:
+        raise ValueError("Coordinates can't form valid spatial polygon")
+    
+    return {
+        "bbox": (minX, minY, maxX, maxY),
+        "crs" : crsFormat,
+        "area_deg_sq": spatialEnv.area
+    }
+
+def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date) -> SentinelHubRequest:
+    clientID = os.getenv("CLIENT_ID")
+    cleintSecret = os.getenv("CLIENT_SECRET")
+
+    config = SHConfig()
+    config.sh_client_id = clientID
+    config.sh_client_secret = cleintSecret
+
+    spatialMeta = farm.getValidatedBounds()
+    minX, minY, maxX, maxY = spatialMeta['bbox']
+
+    sentialBbox = BBox(bbox=[minX, minY, maxX, maxY], crs=CRS.WGS84)
+
+    evalScriptPayLoad = """
+    function setup() {
+        return {
+            input: [
+                "B04",
+                "B08",
+                "SCL"
+            ],
+            output: {
+                bands: 3,
+                sampleType: "FLOAT32"
+            }
+        };
+    }
+
+    function evalPixel(sample){
+        retunr [sample.B04, sample.B08, sample.SCL]
+    }
+    """
+    request = SentinelHubRequest(
+        evalscript=evalScriptPayLoad,
+        input_data=[
+            {
+                "dataFilter": {
+                    "dataCollection": DataCollection.SENTINEL2_L2A,
+                    "timeRange": {
+                        "from": f"{targetDate.isoformat()}T00:00:00Z",
+                        "to": f"{targetDate.isoformat()}T23:59:59Z"
+                    }
+                }
+            }
+        ],
+        responses=[
+            SentinelHubRequest.output_response('default', MimeType.TIFF)
+        ],
+        bbox=sentialBbox,
+        config=config
+    )
+
+    return request
+
+def verifyAPIConnectionMock(farm: FarmWorkspace) -> bool:
+    try:
+        testDate = date(2026, 6, 15)
+        req = genSentinelNDVIReq(farm, testDate)
+
+        if isinstance(req, SentinelHubRequest):
+            print("Mock Test Passed")
+            return True
+    except Exception as mockErr:
+        print(f"Error: {mockErr}")
+        return False
+    return False
+
+def processSatelliteResponseMatrix(rawApiResponseData : np.ndarray, targetShape: Tuple[int, int] = (10, 10)) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if rawApiResponseData.ndim < 3 or rawApiResponseData.shape[-1] != 3:
+        if rawApiResponseData.shape[0] == 3:
+            rawApiResponseData = np.moveaxis(rawApiResponseData, 0, -1)
+
+    rawRed = rawApiResponseData[..., 0]
+    rawNir = rawApiResponseData[..., 1]
+    rawScl = rawApiResponseData[..., 2]
+
+    srcH, srcW = rawRed.shape
+    tgtH, tgtW = targetShape
+
+    rowIndices = np.linspace(0, srcH - 1, tgtH).astype(int)
+    colIndices = np.linspace(0, srcW - 1, tgtW).astype(int)
+
+    resizedRed = rawRed[np.ix_(rowIndices, colIndices)]
+    resizedNir = rawNir[np.ix_(rowIndices, colIndices)]
+    resizedScl = rawScl[np.ix_(rowIndices, colIndices)]
+
+    if np.max(resizedRed) > 1.0:
+        normalizedRed = np.clip(resizedRed / 10000, 0.0, 1.0)
+    else:
+        normalizedRed = np.clip(resizedRed, 0.0, 1.0)
+
+    if np.max(resizedNir) > 1.0:
+        normalizedNir = np.clip(resizedNir / 10000, 0.0, 1.0)
+    else:
+        normalizedNir = np.clip(resizedNir, 0.0, 1.0)
+    
+    cloudMask = (resizedScl == 3) | (resizedScl == 8) | (resizedScl == 9) | (resizedScl == 10)
+
+    return normalizedRed, normalizedNir, cloudMask
+
+def verifyMatrixReshaping() -> bool:
+    print("Response Parsing and Reshaping Test")
+
+    mockHighRes = np.zeros((150, 150, 3))
+    mockHighRes[..., 0] = np.random.uniform(400, 1200, size=(150,150))
+    mockHighRes[..., 0] = np.random.uniform(5000, 7500, size=(150, 150))
+    mockHighRes[..., 2] = 9.0
+
+    try:
+        redGrid, nirGrid, cloudGrid = processSatelliteResponseMatrix(mockHighRes, targetShape=(10, 10))
+        
+        shapeCorrect = (redGrid.shape == (10, 10) and nirGrid.shape == (10, 10) and cloudGrid.shape == (10, 10))
+        boundsCorrect = (np.max(redGrid) <= 1.0 and np.max(nirGrid) <= 1.0)
+        maskCorrect = (cloudGrid[0, 0] == True)
+
+        if shapeCorrect and boundsCorrect and maskCorrect:
+            print("Successfully Verified Matrix Reshaping")
+            return True
+        else:
+            print("Matrix Reshaping Verification Failed")
+            return False
+    
+    except Exception as e:
+        print(f"Execution Failed: {e}")
+        return False
+
