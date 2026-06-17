@@ -109,27 +109,40 @@ def runInteractiveDashboard():
             
             try:
                 userConsent = int(input("Enter choice number index: ")) - 1
-                if 0 <= userConsent < len(availableIDs):
-                    targetID = availableIDs[userConsent]
-                    farm = farmDb[targetID]
+                if not (0 <= userConsent < len(availableIDs)):
+                    print("Out of range :(")
+                    continue
+                targetID = availableIDs[userConsent]
+                farm = farmDb[targetID]
 
-                    latestDateStr = sorted(farm.redBands.keys())[-1]
-                    redArr = farm.redBands[latestDateStr]
-                    nirArr = farm.nIRbands[latestDateStr]
-                    maskArr = farm.cloudMask[latestDateStr]
+                if not farm.historicalDates:
+                    print("No telemtry data available!")
+                    continue
 
-                    ndviMatrix = calculateNDVI(redArr, nirArr, maskArr)
+                latestDateStr = sorted(farm.redBands.keys())[-1]
+                redArr = farm.redBands[latestDateStr]
+                nirArr = farm.nIRbands[latestDateStr]
+                maskArr = farm.cloudMask[latestDateStr]
 
-                    print(f"\n --- Visual Terminal Grid Map Preview ({targetID} | {latestDateStr}) --- ")
-                    textGrid = renderGridMask(ndviMatrix)
+                ndviMatrix = calculateNDVI(redArr, nirArr, maskArr)
 
-                    for rowString in textGrid:
-                        print(rowString)
-                    
-                    exportNDVIHeatMap(ndviMatrix, farm.farmID)
-                else:
-                    print("Error!")
-            except (ValueError, IndexError):
+                validValues = ndviMatrix[~np.isnan(ndviMatrix)]
+                meanNdvi = float(np.mean(validValues)) if validValues.size > 0 else 0.0
+
+                print(f"Calculated Farm Mean NDVI: {meanNdvi:.4f}")
+
+                print("Generating 2D Color-mapped Plot Asset")
+
+                savedPlotFile = exportNDVIHeatMap(farm.farmID, latestDateStr, ndviMatrix)
+
+                print("-" * 50)
+                print("           Diagnostic Scan and Rendering Complete!")
+                print("-" * 50)
+                if savedPlotFile:
+                    print(f"Exported at: {savedPlotFile}")
+                print(f"Overall Field State Mean: {meanNdvi:.4f}")
+                print("-" * 50)
+            except ValueError:
                 print("Invaid Entry Sequence Parameter")
         
         elif userInput == 3:

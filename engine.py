@@ -149,27 +149,31 @@ def excludeAnomolies(farm: FarmWorkspace) -> List[str]:
     
     return alerts
 
-def exportNDVIHeatMap(ndviMatrix: np.ndarray, farmID: str, outputDir: str = "outputReports"):
-    if not os.path.exists(outputDir):
-        os.makedirs(outputDir)
-    
-    plt.figure(figsize=(6, 5))
+def exportNDVIHeatMap(farmID:str, targetDateStr: str, ndviMatrix:np.ndarray, outputDir: str = "outputPlots") -> Optional[str]:
+    try:
+        if not os.path.exists(outputDir):
+            os.makedirs(outputDir)
+        filePath = os.path.join(outputDir, f"{farmID}_{targetDateStr}_Heatmap.png")
+        plt.figure(figsize=(7, 6))
 
-    currentCMap = plt.cm.YlGn.copy()
-    currentCMap.set_bad(color="darkgray")
+        cax = plt.imshow(ndviMatrix, cmap="RdYlGn", vmin=0.1, vmax=1.0, origin="upper")
+        cbar = plt.colorbar(cax, orientation="vertical", pad=0.05)
+        cbar.set_label('NDVI Intensity', rotation=270, labelpad=15)
+        plt.title(f"AgriSat Spatial Imagery Heatmap\nProfile: {farmID} | Frame: {targetDateStr}", fontsize=12, pad=10)
+        plt.xlabel("Grid Column Axis (Slices 0-9)", fontsize = 10)
+        plt.ylabel("Grid Row Axis (Slices 0-9)", fontsize=10)
 
-    img = plt.imshow(ndviMatrix, cmap=currentCMap, vmax=1.0, vmin=0.0)
-    plt.colorbar(img, label="NDVI Intesnity Index Value")
+        plt.xticks(np.arange(10))
+        plt.yticks(np.arange(10))
+        plt.grid(True, which="both", color="black", linestyle=":", linewidth=0.5, alpha=0.5)
 
-    plt.title(f"AgriSat Satellite Performance Mapping: {farmID}")
-    plt.xlabel("Grid X-Axis Coordinate")
-    plt.ylabel("Grid Y-Axis Coordinate")
+        plt.savefig(filePath, dpi=150, bbox_inches="tight")
+        plt.close()
+        return filePath
+    except Exception as e:
+        print(f"Matplotlib Error: {e}")
+        return None
 
-    outputPath = os.path.join(outputDir, f"{farmID}HeatMap.png")
-    plt.savefig(outputPath, dpi=150, bbox_inches="tight")
-    plt.close()
-
-    print(f"Graphical Map Generated and Saved at: {outputPath}")
 
 def deserializeFarmWorkspace(farmID: str, storageDir: str = "data_store") -> Optional[FarmWorkspace]:
     metaPath = os.path.join(storageDir, f"{farmID}_meta.json")
