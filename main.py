@@ -209,56 +209,22 @@ def runInteractiveDashboard():
                 targetID = availableIDs[farmChoice]
                 farm = farmDb[targetID]
 
-                print(f"\nSelect target date: ")
-                availableDates = sorted(list(farm.redBands.keys()))
-                for idx, dstr in enumerate(availableDates, 1):
-                    print(f"[{idx}]: [{dstr}]")
-
-                dateChoice = int(input("Enter choice index: ")) - 1
-
-                if not (0 <= dateChoice < len(availableDates)):
-                    print("Out of range")
+                if not farm.historicalDates:
+                    print("No Telemetry Data found for this profie")
                     continue
-                targetDateStr = availableDates[dateChoice]
+                latestDateStr = sorted(farm.redBands.keys())[-1]
+                ndviMatrix = calculateNDVI(farm.redBands[latestDateStr], farm.nIRbands[latestDateStr], farm.cloudMask[latestDateStr])
 
-                ndviMatrix = calculateNDVI(
-                    farm.redBands[targetDateStr],
-                    farm.nIRbands[targetDateStr],
-                    farm.cloudMask[targetDateStr]
-                )
+                fullReport = analyzeZSG(ndviMatrix, targetedQuadrant="ALL")
 
-                print("\nSelect target sector location: ")
-                print("1. Northwest")
-                print("2. Northeast")
-                print("3. Southwest")
-                print("4. Southeast")
-                quadCode = int(input("Enter Sector index: "))
+                print(f"\n" + "-" * 50)
+                print(f"Spatial Zonal Diagnostics: {targetID}")
+                print(f"Target Snapshot Date: {latestDateStr}")
+                print("-" * 50)
 
-                if quadCode != 1 and quadCode !=2 and quadCode != 3 and quadCode != 4:
-                    print("Wrong Selection")
-                    continue
-                
-                if quadCode == 1:
-                    quadCode = "NW"
-                elif quadCode == 2:
-                    quadCode = "NE"
-                elif quadCode == 3:
-                    quadCode = "SW"
-                elif quadCode == 4:
-                    quadCode = "SE"
-                
-                stats = analyzeZSG(ndviMatrix, quadCode)
-
-                print(f"\n" + "-" * 45)
-                print(f"Spatial Analysis Report: {targetID} ({quadCode})")
-                print(f"Timestmap: {targetDateStr}")
-                print("-" * 45)
-                print(f"Status: {stats['status']}")
-                print(f"Mean NDVI: {stats['mean']:.4f}")
-                print(f"Maximum NDVI: {stats['max']:.4f}")
-                print(f"Minimum NDVI: {stats['min']:.4f}")
-                print(f"Valid Data Coverage: {stats['coverage_pct']:.1f}%")
-                print("-" * 45)
+                for quad, data in fullReport.items():
+                    print(f"Sector [{quad}]: Mean NDVI: {data['mean_ndvi']:.4f} | Density: {data['coverage_pct']}% | Status: {data['status']}")
+                print("-" * 50)
             except ValueError:
                 print("Format Error")
         elif userInput == 6:

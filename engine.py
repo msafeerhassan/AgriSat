@@ -195,47 +195,43 @@ def deserializeFarmWorkspace(farmID: str, storageDir: str = "data_store") -> Opt
         farm.cloudMask = arrays["cloudMasks"]
     return farm
 
-def analyzeZSG(ndviMatrix: np.ndarray, quadrant: str) -> dict:
-    if quadrant.lower() == "nw":
-        rowStart, rowEnd, colStart, colEnd = 0, 5, 0, 5
-    elif quadrant.lower() == "ne":
-        rowStart, rowEnd, colStart, colEnd = 0, 5, 5, 10
-    elif quadrant.lower() == "sw":
-        rowStart, rowEnd, colStart, colEnd = 5, 10, 0, 5
-    elif quadrant.lower() == "se":
-        rowStart, rowEnd, colStart, colEnd = 5, 10, 5, 10
-    else: 
-        raise ValueError("Unknow orientations.")
-    
-    zonalSlice = ndviMatrix[rowStart:rowEnd, colStart:colEnd]
-
-    validPix = zonalSlice[~np.isnan(zonalSlice)]
-
-    if validPix.size == 0:
-        return {
-            "mean": 0.0,
-            "max": 0.0,
-            "min": 0.0,
-            "coverage_pct": 0.0,
-            "status": "Obscured (100% Cloud Cover)"
-        }
-    meanVal = float(np.mean(validPix))
-    coveragePct = (validPix.size / zonalSlice.size) * 100
-
-    if meanVal > 0.7:
-        status = "Excellent - High Biomass"
-    elif meanVal > 0.4:
-        status = "Moderate - Stable Development"
-    else:
-        status = "Critical - Low Vegetation Density"
-    
-    return {
-        "mean": meanVal,
-        "max": float(np.max(validPix)),
-        "min": float(np.min(validPix)),
-        "coverage_pct": coveragePct,
-        "status": status
+def analyzeZSG(ndviMatrix: np.ndarray, targetedQuadrant: str = "ALL") -> dict:
+    quadrantDefinitons = {
+        "NW": (slice(0,5), slice(0, 5)),
+        "NE": (slice(0,5), slice(5, 10)),
+        "SW": (slice(5,10), slice(0, 5)),
+        "SE": (slice(5,10), slice(5, 10)),
     }
+
+    combinedZonalRep = {}
+
+    for quadCode, (rowSlice, colSlice) in quadrantDefinitons.items():
+        subMatrix = ndviMatrix[rowSlice, colSlice]
+
+        validValues = subMatrix[~np.isnan(subMatrix)]
+
+        if validValues.size == 0:
+            meanNDVI = 0.0
+            status = "Insufficient Data"
+        else:
+            meanNDVI = float(np.mean(validValues))
+            if meanNDVI >= 0.6:
+                status = "Optimal Dense Greenery"
+            elif meanNDVI >= 0.35:
+                status = "Moderate Vegetation"
+            else:
+                status = "Critical Condition!"
+        
+        combinedZonalRep[quadCode] = {
+            "mean_ndvi": meanNDVI,
+            "status": status,
+            "active_pixels": int(validValues.size),
+            "coverage_pct": float((validValues.size / 25.0) * 100.0)
+        }
+
+    if targetedQuadrant in quadrantDefinitons:
+        return combinedZonalRep[targetedQuadrant]
+    return combinedZonalRep
 
 def genHistoricalRep(farm: FarmWorkspace) -> Dict:
     meansTL = temporalTLSweeper(farm)
@@ -395,7 +391,7 @@ def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date) -> SentinelHubRequ
         };
     }
 
-    function evalPixel(sample){
+    function evaluatePixel(sample){
         return [sample.B04, sample.B08, sample.SCL]
     }
     """
