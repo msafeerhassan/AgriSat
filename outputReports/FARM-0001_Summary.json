@@ -1,0 +1,42 @@
+{
+    "farmID": "FARM-0001",
+    "cropType": "Rice",
+    "geographical_bounds": {
+        "min_x": 34.01,
+        "min_y": -118.24,
+        "max_x": 34.07,
+        "max_y": -118.23
+    },
+    "temporalTrends": {
+        "assessment": "Decline",
+        "overall_slope": -0.06700297491571378,
+        "trend_vector": "Downwards Growth (0.76 -> 0.75 -> 0.00 -> 0.75 -> 0.75 -> 0.14)"
+    },
+    "spatial_zones": {
+        "NW": {
+            "mean_ndvi": 0.14296671687893336,
+            "status": "Critical Condition!",
+            "active_pixels": 23,
+            "coverage_pct": 92.0
+        },
+        "NE": {
+            "mean_ndvi": 0.1269004632781099,
+            "status": "Critical Condition!",
+            "active_pixels": 24,
+            "coverage_pct": 96.0
+        },
+        "SW": {
+            "mean_ndvi": 0.13587186202962875,
+            "status": "Critical Condition!",
+            "active_pixels": 22,
+            "coverage_pct": 88.0
+        },
+        "SE": {
+            "mean_ndvi": 0.148331897170636,
+            "status": "Critical Condition!",
+            "active_pixels": 22,
+            "coverage_pct": 88.0
+        }
+    },
+    "compiled_timestamp": "2026-06-17"
+}

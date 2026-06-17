@@ -216,7 +216,7 @@ def analyzeZSG(ndviMatrix: np.ndarray, targetedQuadrant: str = "ALL") -> dict:
         else:
             meanNDVI = float(np.mean(validValues))
             if meanNDVI >= 0.6:
-                status = "Optimal Dense Greenery"
+                status = "Optimal Dense Canopy"
             elif meanNDVI >= 0.35:
                 status = "Moderate Vegetation"
             else:
@@ -234,44 +234,50 @@ def analyzeZSG(ndviMatrix: np.ndarray, targetedQuadrant: str = "ALL") -> dict:
     return combinedZonalRep
 
 def genHistoricalRep(farm: FarmWorkspace) -> Dict:
-    meansTL = temporalTLSweeper(farm)
-    sortedDates = sorted(meansTL.keys())
 
-    if len(sortedDates) < 2:
+    if len(farm.historicalDates) < 2:
         return {
-            "dates": sortedDates,
-            "means": [meansTL.get(d, 0,0) for d in sortedDates],
             "overall_slope": 0.0,
-            "trend_vector": "Insufficient Data Sequence",
-            "assessment": "Need atleast 2 historical frames to evaluate trends"
+            "trend_vector": "Stable / Insufficient Data",
+            "assessment": "Stable"
         }
-    meansList = [meansTL[d] for d in sortedDates]
-
-    slopes = []
-    for i in range(1, len(meansList)):
-        slopes.append(meansList[i] - meansList[i-1])
-
-    overallSlope = meansList[-1] - meansList[0]
-
-    if overallSlope > 0.15:
-        assesment = "Growth!"
-        trendVector = "📈 Upward Growth (".join([f"{m:.2f}" for m in meansList]) + ")"
-    elif overallSlope <-0.15:
-        assesment = "Decline!"
-        trendVector = "📉 Downward Growth (".join([f"{m:.2f}" for m in meansList]) + ")"
-    else:
-        assesment = "Stable!"
-        trendVector = "Stable (".join([f"{m:.2f}" for m in meansList]) + ")"
     
+    ndviMeans = []
+
+    for d in farm.historicalDates:
+        dateStr = d.isoformat()
+        ndvi = calculateNDVI(farm.redBands[dateStr], farm.nIRbands[dateStr], farm.cloudMask[dateStr])
+        valid = ndvi[~np.isnan(ndvi)]
+        ndviMeans.append(float(np.mean(valid)) if valid.size > 0 else 0.0)
+
+    xVals = np.arange(len(ndviMeans))
+
+    slope, _ = np.polyfit(xVals, ndviMeans, 1)
+
+    vectorSegments = []
+
+    for val in ndviMeans:
+        vectorSegments.append(f"{val:.2f}")
+
+    if slope > 0.02:
+        direction = "Upward Growth"
+        assessment = "Optimal Health Progress"
+    elif slope <-0.02:
+        direction = "Downwards Growth"
+        assessment = "Decline"
+    else:
+        direction = "Stable!"
+        assessment = "Stable Mainatainance"
+
+    trendVectorString = f"{direction} (" + " -> ".join(vectorSegments) + ")"
+
     return {
-        "dates": sortedDates,
-        "means": meansList,
-        "overall_slope": overallSlope,
-        "trend_vector": trendVector,
-        "assessment": assesment
+        "overall_slope": float(slope),
+        "trend_vector": trendVectorString,
+        'assessment': assessment
     }
 
-def exportDetailedFarmReport(farm: FarmWorkspace, trendReport: dict, zonalReport: dict, quadCode: str, outputDir: str = "outputReports") -> str:
+def exportDetailedFarmReport(farm: FarmWorkspace, trendReport: dict, zonalReport: dict, outputDir: str = "outputReports") -> str:
     if not os.path.exists(outputDir):
         os.makedirs(outputDir)
 
@@ -279,21 +285,18 @@ def exportDetailedFarmReport(farm: FarmWorkspace, trendReport: dict, zonalReport
     jsonPayload = {
         "farmID": farm.farmID,
         "cropType": farm.cropType,
-        "coordinates": farm.geoBoundary,
+        "geographical_bounds": {
+            "min_x": farm.geoBoundary[0],
+            "min_y": farm.geoBoundary[1],
+            "max_x": farm.geoBoundary[2],
+            "max_y": farm.geoBoundary[3]
+        },
         "temporalTrends": {
-            "monitored_dates": trendReport["dates"],
-            "historical_means": trendReport["means"],
-            "seasonal_slope": float(trendReport["overall_slope"]),
-            "trajectory_assessment": trendReport["assessment"]
+            "assessment": trendReport.get("assessment", "Unknown"),
+            "overall_slope": float(trendReport.get("overall_slope", 0.0)),
+            "trend_vector": trendReport.get("trend_vector", "Stable")
         },
-        "spatial_zone_analysis": {
-            "analyzed_sector": quadCode,
-            "mean_ndvi": zonalReport["mean"],
-            "max_ndvi": zonalReport["max"],
-            "min_ndvi": zonalReport["min"],
-            "data_coverage_pct": zonalReport["coverage_pct"],
-            "sector_status": zonalReport["status"]
-        },
+        "spatial_zones": zonalReport,
         "compiled_timestamp": date.today().isoformat()
     }
 
@@ -309,18 +312,19 @@ def exportDetailedFarmReport(farm: FarmWorkspace, trendReport: dict, zonalReport
         tf.write(f"Geo Boundary: {farm.geoBoundary}\n")
         tf.write(f"Report Generated at: {date.today().isoformat()}\n")
         tf.write("-" * 50 + "\n")
-        tf.write(f"Assessment: {trendReport['assessment']}\n")
-        tf.write(f"Net Slope: {trendReport['overall_slope']:.4f}\n")
-        tf.write(f"Trend Vector: {trendReport['trend_vector']}\n")
-        tf.write("-" * 60 + "\n")
-        tf.write(f"Spatial Grid Diagnostic: ({quadCode})\n")
-        tf.write(f"Sector Status: {zonalReport['status']}\n")
-        tf.write(f"Mean NDVI: {zonalReport['mean']:.4f}\n")
-        tf.write(f"Peak NDVI: {zonalReport['max']:.4f}\n")
-        tf.write(f"Lowest NDVI: {zonalReport['min']:.4f}\n")
-        tf.write(f"Valid Pixels: {zonalReport['coverage_pct']:.1f}%\n")
+        tf.write(f"Vector Trajectory: {trendReport.get('trend_vector', 'N/A')}\n")
+        tf.write(f"Net Slope: {trendReport.get('overall_slope', 0.0):.6f}\n")
+        tf.write(f"Health Assessment: {trendReport.get('assessment', 'N/A')}\n")
+        tf.write("-" * 50 + "\n")
+        tf.write(f"Spatial Grid Diagnostic\n")
+
+        for quad, metrics in zonalReport.items():
+            tf.write(f"Sector: {quad}\n")
+            tf.write(f"Mean NDVI: {metrics['mean_ndvi']:.4f}\n")
+            tf.write(f"Clean Pixel Count: {metrics['active_pixels']}/25\n")
+            tf.write(f"Canopy Density: {metrics['coverage_pct']}%\n")
+            tf.write(f"Sector Status: {metrics['status']}\n")
         tf.write("-" * 50 +"\n")
-        tf.write("End of Generated Satellite Telemetry Document Summary. \n")
     return basePath
 
 def verifySentinelCredentials() -> bool:

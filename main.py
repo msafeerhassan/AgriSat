@@ -269,20 +269,22 @@ def runInteractiveDashboard():
             try:
                 farmChoice = int(input("Enter the farm index to continue with: ")) - 1
                 if not (0 <= farmChoice < len(availableIDs)):
-                    print("Out of Range :)")
+                    print("Out of Range :(")
                     continue
                 targetID = availableIDs[farmChoice]
                 farm = farmDb[targetID]
 
+                if not farm.historicalDates:
+                    print("No Telemetry Records Found for this Farm.")
+                    continue
                 trendReport = genHistoricalRep(farm)
                 latestDateStr = sorted(farm.redBands.keys())[-1]
 
                 ndviMatrix = calculateNDVI(farm.redBands[latestDateStr], farm.nIRbands[latestDateStr], farm.cloudMask[latestDateStr])
 
-                quadCode = "NW"
-                zonalRep = analyzeZSG(ndviMatrix, quadCode)
+                zonalRep = analyzeZSG(ndviMatrix, targetedQuadrant="ALL")
 
-                savedPathBase = exportDetailedFarmReport(farm, trendReport, zonalRep, quadCode)
+                savedPathBase = exportDetailedFarmReport(farm, trendReport, zonalRep)
 
                 print(f"\n" + "-" * 50)
                 print(f"           Report Exported Successfully!")
