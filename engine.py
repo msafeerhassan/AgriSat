@@ -531,3 +531,24 @@ def smoothenTemporalNDVI(rawMeans: List[float], windowSize: int = 3) -> List[flo
         smoothedList.append(float(np.mean(windowSlice)))
     
     return smoothedList
+
+def predictFutureNDVI(cleanMeans: List[float], projectionSteps: int = 3) -> List[float]:
+    if len(cleanMeans) < 2:
+        if cleanMeans:
+            return cleanMeans[-1] * projectionSteps
+        else:
+            return 0.0
+        
+    xVals = np.arange(len(cleanMeans))
+
+    slope, intercept = np.polyfit(xVals, cleanMeans, 1)
+
+    predictions = []
+
+    for step in range(1, projectionSteps + 1):
+        futureIdx = len(cleanMeans) - 1 + step
+        projectVal = slope * futureIdx + intercept
+
+        clampedVal = max(-0.1, min(1.0, float(projectVal)))
+        predictions.append(clampedVal)
+    return predictions

@@ -2,7 +2,7 @@ import sys, os
 from datetime import date, timedelta
 import numpy as np
 from dotenv import load_dotenv
-from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport, verifySentinelCredentials, genSentinelNDVIReq, verifyAPIConnectionMock, verifyMatrixReshaping, downloadAndRegisterSatelliteTelemetry
+from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport, verifySentinelCredentials, genSentinelNDVIReq, verifyAPIConnectionMock, verifyMatrixReshaping, downloadAndRegisterSatelliteTelemetry, smoothenTemporalNDVI, predictFutureNDVI
 from utils import displayTabSummary
 
 load_dotenv()
@@ -100,7 +100,6 @@ def runInteractiveDashboard():
                 })
             
             displayTabSummary(uiList)
-
         elif userInput == 2:
             print("\nSelect target farm registry workspace: ")
             availableIDs = list(farmDb.keys())
@@ -143,8 +142,7 @@ def runInteractiveDashboard():
                 print(f"Overall Field State Mean: {meanNdvi:.4f}")
                 print("-" * 50)
             except ValueError:
-                print("Invaid Entry Sequence Parameter")
-        
+                print("Invaid Entry Sequence Parameter")  
         elif userInput == 3:
             print("\nEvaluating Farm Profiles in Database and detecting anomolies...")
             alertFound = False
@@ -154,8 +152,7 @@ def runInteractiveDashboard():
                     print(alert)
                     alertFound = True
             if not alertFound:
-                print("Everything is OK uptil now :)")
-        
+                print("Everything is OK uptil now :)")     
         elif userInput == 4:
             print("\nSelect target farm profile to append the telemtry Data: ")
             availableIDs = list(farmDb.keys())
@@ -254,22 +251,37 @@ def runInteractiveDashboard():
                 targetID = availableIDs[farmChoice]
                 farm = farmDb[targetID]
 
-                report = genHistoricalRep(farm)
-
+                if not farm.historicalDates or len(farm.redBands) == 0:
+                    print("No Telemtry Data Found!")
+                    continue
                 print("\n" + "-" * 50)
-                print(f"Historical Trend Profile of: {targetID}")
+                print(f"Historical Trend Profile & Predictive Insights")
                 print("-" * 50)
-                print(f"Crop Variety: {farm.cropType}")
-                print(f"Monitoring Date Range: {report['dates'][0]} to {report['dates'][-1]}")
-                print(f"Slope: {report['overall_slope']:.4f}")
-                print(f"Trend Vector: {report['trend_vector']}")
-                print(f"Remarks: {report['assessment']}")
+                report = genHistoricalRep(farm)
+                print(f"Farm Identity: {farm.farmID} ({farm.cropType})")
+                print(f"Slope: {report['overall_slope']:.6f}")
+                print(f"Smoothed Vector: {report['trend_vector']}")
+                print(f"Current Status: {report['assessment']}")
                 print("-" * 50)
 
-                print("\nTimeline Breakdown: ")
-                for d, m in zip(report['dates'], report['means']):
-                    print(f"{d} Average NDVI: {m:.4f}")
-                
+                rawMeans = []
+                for d in farm.historicalDates:
+                    dateStr = d.isoformat()
+                    ndvi = calculateNDVI(farm.redBands[dateStr], farm.nIRbands[dateStr] , farm.cloudMask[dateStr])
+                    valid = ndvi[~np.isnan(ndvi)]
+                    rawMeans.append(float(np.mean(valid)) if valid.size > 0 else 0.0)
+                cleanMeans = smoothenTemporalNDVI(rawMeans, windowSize=3)
+
+                futurePredict = predictFutureNDVI(cleanMeans, projectionSteps=3)
+
+                print(f"Seasonal Expectations Forecasting of Next 3 Cycles")
+                for cycle, projectVal in enumerate(futurePredict, 1):
+                    if projectVal < 0.25:
+                        alertTag = "Risk!"
+                    else:
+                        alertTag = "Safe!"
+                    
+                    print(f"Cycle +{cycle} Projection: Expected NDVI: {projectVal} | Status: {alertTag}")
                 print("-" * 50)
             except ValueError:
                 print("Error")
