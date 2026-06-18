@@ -1,0 +1,13 @@
+credentials:
+  usernames:
+    safeer:
+      email: msafeerhassan0@gmail.com
+      name: Safeer Hassan
+      password: "$2b$12$V1ifGUEX9LJN3YBEZYIbg.sHozoN/hOUwl6iWEFef8hkLctj3wD4O"
+cookie:
+  expiry_days: 30
+  key: agrisat_signature_cookie_key
+  name: agrisat_cookie
+preauthorized:
+  emails:
+   - msafeerhassan0@gmail.com
