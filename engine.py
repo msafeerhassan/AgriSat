@@ -3,6 +3,7 @@ from typing import List, Tuple, Dict, Optional
 import numpy as np
 from datetime import date
 import os, json, pickle, time
+from datetime import timedelta
 import matplotlib.pyplot as plt
 from sentinelhub import SHConfig, SentinelHubRequest, DataCollection, BBox, CRS, MimeType
 from shapely.geometry import box, Polygon, Point
@@ -400,7 +401,7 @@ def validateAndStandardizeBBox(bboxTuple: Tuple[float, float, float, float] , cr
         "area_deg_sq": spatialEnv.area
     }
 
-def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date) -> SentinelHubRequest:
+def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date, lookBackDays: int = 10) -> SentinelHubRequest:
     clientID = os.getenv("CLIENT_ID")
     cleintSecret = os.getenv("CLIENT_SECRET")
 
@@ -410,7 +411,6 @@ def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date) -> SentinelHubRequ
 
     spatialMeta = farm.getValidatedBounds()
     minX, minY, maxX, maxY = spatialMeta['bbox']
-
     sentialBbox = BBox(bbox=[minX, minY, maxX, maxY], crs=CRS.WGS84)
 
     evalScriptPayLoad = """
@@ -432,12 +432,16 @@ def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date) -> SentinelHubRequ
         return [sample.B04, sample.B08, sample.SCL]
     }
     """
+
+    startDate = targetDate - timedelta(days=lookBackDays)
+
     request = SentinelHubRequest(
         evalscript=evalScriptPayLoad,
         input_data=[
             SentinelHubRequest.input_data(
                 data_collection=DataCollection.SENTINEL2_L2A,
-                time_interval=(f"{targetDate.isoformat()}T00:00:00Z", f"{targetDate.isoformat()}T23:59:59Z")
+                time_interval=(f"{startDate.isoformat()}T00:00:00Z", f"{targetDate.isoformat()}T23:59:59Z"),
+                maxcc=0.8
             )
         ],
         responses=[
@@ -445,6 +449,7 @@ def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date) -> SentinelHubRequ
         ],
         bbox=sentialBbox,
         resolution=10,
+        mosaicking_order="least-cc",
         config=config
     )
 
@@ -568,9 +573,9 @@ def smoothenTemporalNDVI(rawMeans: List[float], windowSize: int = 3) -> List[flo
 def predictFutureNDVI(cleanMeans: List[float], projectionSteps: int = 3) -> List[float]:
     if len(cleanMeans) < 2:
         if cleanMeans:
-            return cleanMeans[-1] * projectionSteps
+            return [float(cleanMeans[-1])] * projectionSteps
         else:
-            return 0.0
+            return [0.0] * projectionSteps
         
     xVals = np.arange(len(cleanMeans))
 
@@ -582,8 +587,8 @@ def predictFutureNDVI(cleanMeans: List[float], projectionSteps: int = 3) -> List
         futureIdx = len(cleanMeans) - 1 + step
         projectVal = slope * futureIdx + intercept
 
-        clampedVal = max(-0.1, min(1.0, float(projectVal)))
-        predictions.append(clampedVal)
+        # clampedVal = max(-0.1, min(1.0, float(projectVal)))
+        predictions.append(float(np.clip(projectVal, -1.0, 1.0)))
     return predictions
 
 def parseGeoJSONPolygon(filePath: str) -> Optional[Tuple[str, str, Tuple[float, float, float, float], List[Tuple[float, float]]]]:
