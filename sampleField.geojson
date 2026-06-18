@@ -1,0 +1,24 @@
+{
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "properties": {
+                "farmID": "FARM-0999",
+                "cropType": "Sugarcane"
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [73.3510, 30.3410],
+                        [73.3590, 30.3420],
+                        [73.3580, 30.3490],
+                        [73.3520, 30.3480],
+                        [73.3510, 30.3410]
+                    ]
+                ]
+            }
+        }
+    ]
+}

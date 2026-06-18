@@ -585,3 +585,35 @@ def predictFutureNDVI(cleanMeans: List[float], projectionSteps: int = 3) -> List
         clampedVal = max(-0.1, min(1.0, float(projectVal)))
         predictions.append(clampedVal)
     return predictions
+
+def parseGeoJSONPolygon(filePath: str) -> Optional[Tuple[str, str, Tuple[float, float, float, float], List[Tuple[float, float]]]]:
+    if not os.path.exists(filePath):
+        print(f"Error: Target file doesn't exists: {filePath}")
+        return None
+    try:
+        with open(filePath, 'r') as file:
+            geoData = json.load(file)
+
+        feature = geoData["features"][0]
+        properties = feature["properties"]
+        geometry = feature["geometry"]
+
+        farmID = properties.get("farmID", "FARM-UNKNOWN")
+        cropType = properties.get("cropType", "Unknown Crop")
+
+        if geometry["type"] != "Polygon":
+            print("Error: Vector File must have valid Polygon Geometry Feature")
+            return None
+        
+        rawCoordinates = geometry["coordinates"][0]
+
+        polygonCoords = [(float(pt[0]), float(pt[1])) for pt in rawCoordinates]
+
+        tempPoly = Polygon(polygonCoords)
+
+        geoBoundary = tempPoly.bounds
+
+        return farmID, cropType, geoBoundary, polygonCoords
+    except Exception as e:
+        print(f"Failed parsing GeoJSON File: {e}")
+        return None

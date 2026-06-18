@@ -2,7 +2,7 @@ import sys, os
 from datetime import date, timedelta
 import numpy as np
 from dotenv import load_dotenv
-from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport, verifySentinelCredentials, genSentinelNDVIReq, verifyAPIConnectionMock, verifyMatrixReshaping, downloadAndRegisterSatelliteTelemetry, smoothenTemporalNDVI, predictFutureNDVI, genPolygonRasterMask
+from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport, verifySentinelCredentials, genSentinelNDVIReq, verifyAPIConnectionMock, verifyMatrixReshaping, downloadAndRegisterSatelliteTelemetry, smoothenTemporalNDVI, predictFutureNDVI, genPolygonRasterMask, parseGeoJSONPolygon, processSatelliteResponseMatrix
 from utils import displayTabSummary
 
 load_dotenv()
@@ -174,57 +174,108 @@ def runInteractiveDashboard():
             if not alertFound:
                 print("Everything is OK uptil now :)")     
         elif userInput == 4:
-            print("\nSelect target farm profile to append the telemtry Data: ")
-            availableIDs = list(farmDb.keys())
-            for idx, fId in enumerate(availableIDs, 1):
-                print(f"[{idx}: {fId}]")
-            
-            try:
-                farmChoice = int(input("Enter the farm index to continue with: ")) - 1
-                if not (0 <= farmChoice < len(availableIDs)):
-                    print("Out of Range :)")
-                    continue
-                targetID = availableIDs[farmChoice]
-                selectedFarm = farmDb[targetID]
+            print("\n" + "-" * 50)
+            print("           Telemtry & Workspace Ingestion")
+            print("-" * 50)
+            print("[1]: Load & Register New Farm Workspace from GeoJSON File")
+            print("[2]: Append Telemetry Snapshot to Existing Farm Workspace")
 
-                print(f"\nEnter the date for new snapshots insertion: ")
-                year = int(input("Enter year: "))
-                month = int(input("Enter Month: "))
-                day = int(input("Enter day"))
-                inputDate = date(year, month, day)
-
-                if inputDate.isoformat() in selectedFarm.redBands:
-                    print(f"Matrix Data already present for {inputDate.isoformat()}.")
-                    continue
-
-                print("\nChoose Telemetry Data Intake Source: ")
-                print("[1]: Download Live Sentinel-2 Satellite Telemetry")
-                print("[2]: Use Mock Simulation")
-                dataSourceChoice = int(input("Select 1 or 2: "))
-
-                if dataSourceChoice == 1:
-                    success = downloadAndRegisterSatelliteTelemetry(selectedFarm, inputDate)
-                    if not success:
-                        print("Failed fetching satellite data.")
-                        continue
-                else:
-                    print("\nSelect crop health status: ")
-                    print("[1]: Optimally Healthy Vegetation")
-                    print("[2]: Environmental Stress")
-                    condChoice = int(input("Select 1 or 2:"))
-
-                    conditionStr = "healthy" if condChoice == 1 else "stressed"
-
-                    redMatrix = genSpectralBand(conditionStr, "red")
-                    nirMatrix = genSpectralBand(conditionStr, "nir")
-                    cloudMatrix = genCloudMask(coverageProb=0.12)
-
-                    selectedFarm.addTelemetrySnapshot(inputDate, redMatrix, nirMatrix, cloudMatrix)
-
-                    serializeFarmWorkspace(selectedFarm)
-                    print(f"Telemetry Snapshot for {inputDate.isoformat()} successfully added")
+            try: 
+                subChoice = int(input("Select action (1 or 2): "))
             except ValueError:
-                print("Invalid Entry!")
+                print("Invalid Input :(")
+                continue
+
+            if subChoice == 1:
+                filePathInput = input("Enter relative file path to .geojson file: ").strip()
+                parsedData = parseGeoJSONPolygon(filePathInput)
+
+                if parsedData:
+                    fID, cType, gBounds, pCoords = parsedData
+
+                    if fID in farmDb:
+                        print(f"Farm Prole with ID {fID} already exists!")
+                        continue
+
+                    newFarm = FarmWorkspace(
+                        farmID=fID,
+                        cropType=cType,
+                        geoBoundary=gBounds,
+                        polygonCoords=pCoords
+                    )
+
+                    verifyAPIConnectionMock(newFarm)
+
+                    baseShape = (10, 10)
+                    pMask = genPolygonRasterMask(newFarm, baseShape)
+
+                    for days in [15, 10, 5]:
+                        snapDate = date.today() - timedelta(days=days)
+                        hRed = genSpectralBand("healthy", "red", baseShape)
+                        hNir = genSpectralBand("healthy", "nir", baseShape)
+                        cMask = genCloudMask(baseShape, coverageProb=0.0)
+                        hRed[~pMask] = np.nan
+                        hNir[~pMask] = np.nan
+                        cMask[~pMask] = True
+                        newFarm.addTelemetrySnapshot(snapDate, hRed, hNir, cMask)
+                    
+                    serializeFarmWorkspace(newFarm)
+                    farmDb[fID] = newFarm
+                    print(f"Successfully Imported Profile: {fID} ({cType})")
+                continue
+
+            elif subChoice == 2:
+                print("\nSelect target farm profile to append the telemtry Data: ")
+                availableIDs = list(farmDb.keys())
+                for idx, fId in enumerate(availableIDs, 1):
+                    print(f"[{idx}: {fId}]")
+            
+                try:
+                    farmChoice = int(input("Enter the farm index to continue with: ")) - 1
+                    if not (0 <= farmChoice < len(availableIDs)):
+                        print("Out of Range :)")
+                        continue
+                    targetID = availableIDs[farmChoice]
+                    selectedFarm = farmDb[targetID]
+
+                    print(f"\nEnter the date for new snapshots insertion: ")
+                    year = int(input("Enter year: "))
+                    month = int(input("Enter Month: "))
+                    day = int(input("Enter day"))
+                    inputDate = date(year, month, day)
+
+                    if inputDate.isoformat() in selectedFarm.redBands:
+                        print(f"Matrix Data already present for {inputDate.isoformat()}.")
+                        continue
+
+                    print("\nChoose Telemetry Data Intake Source: ")
+                    print("[1]: Download Live Sentinel-2 Satellite Telemetry")
+                    print("[2]: Use Mock Simulation")
+                    dataSourceChoice = int(input("Select 1 or 2: "))
+
+                    if dataSourceChoice == 1:
+                        success = downloadAndRegisterSatelliteTelemetry(selectedFarm, inputDate)
+                        if not success:
+                            print("Failed fetching satellite data.")
+                            continue
+                    else:
+                        print("\nSelect crop health status: ")
+                        print("[1]: Optimally Healthy Vegetation")
+                        print("[2]: Environmental Stress")
+                        condChoice = int(input("Select 1 or 2:"))
+
+                        conditionStr = "healthy" if condChoice == 1 else "stressed"
+
+                        redMatrix = genSpectralBand(conditionStr, "red")
+                        nirMatrix = genSpectralBand(conditionStr, "nir")
+                        cloudMatrix = genCloudMask(coverageProb=0.12)
+
+                        selectedFarm.addTelemetrySnapshot(inputDate, redMatrix, nirMatrix, cloudMatrix)
+
+                        serializeFarmWorkspace(selectedFarm)
+                        print(f"Telemetry Snapshot for {inputDate.isoformat()} successfully added")
+                except ValueError:
+                    print("Invalid Entry!")
         elif userInput == 5:
             print("\nSelect target farm: ")
             availableIDs = list(farmDb.keys())
