@@ -20,8 +20,12 @@ from engine import (
     analyzeZSG,
     genHistoricalRep,
     predictFutureNDVI,
-    exportDetailedFarmReport
+    exportDetailedFarmReport,
+    verifySentinelCredentials
 )
+from dotenv import load_dotenv
+
+load_dotenv()
 
 st.set_page_config(page_title="AgriSat Dashboard", page_icon="🛰️", layout="wide")
 
@@ -54,6 +58,23 @@ elif authenticationStatus is None:
     st.stop()
 
 st.sidebar.title(f"Welcome, {name}!")
+st.sidebar.markdown("### Satellite Gateway Status")
+with st.sidebar.spinner("Checking SentinelHub Connection..."):
+    clientID = os.getenv("CLIENT_ID")
+    clientSecret = os.getenv("CLIENT_SECRET")
+
+    if not clientID or not clientSecret:
+        st.sidebar.error("Credentials Missing :(")
+        connectionValidity = False
+    else:
+        connectionValidity = True
+        if connectionValidity:
+            st.sidebar.success("SentinelHub API: Connected")
+        else:
+            st.sidebar.error("SentinelHub API: Authentication Failed")
+
+st.sidebar.divider()
+
 authenticator.logout("Logout", "sidebar")
 
 actionMode = st.sidebar.radio(

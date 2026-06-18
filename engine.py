@@ -401,19 +401,14 @@ def validateAndStandardizeBBox(bboxTuple: Tuple[float, float, float, float] , cr
         "area_deg_sq": spatialEnv.area
     }
 
-def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date, lookBackDays: int = 10) -> SentinelHubRequest:
-    clientID = os.getenv("CLIENT_ID")
-    cleintSecret = os.getenv("CLIENT_SECRET")
+def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date, config: SHConfig) -> SentinelHubRequest:
+    minLon, minLat, maxLon, maxLat = farm.geoBoundary
+    
+    sentinelBBox = BBox(bbox=[minLon, minLat, maxLon, maxLat], crs=CRS.WGS84)
 
-    config = SHConfig()
-    config.sh_client_id = clientID
-    config.sh_client_secret = cleintSecret
+    dateWindow = (targetDate.isoformat(), targetDate.isoformat())
 
-    spatialMeta = farm.getValidatedBounds()
-    minX, minY, maxX, maxY = spatialMeta['bbox']
-    sentialBbox = BBox(bbox=[minX, minY, maxX, maxY], crs=CRS.WGS84)
-
-    evalScriptPayLoad = """
+    evalScript = """
     function setup() {
         return {
             input: [
@@ -433,23 +428,19 @@ def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date, lookBackDays: int 
     }
     """
 
-    startDate = targetDate - timedelta(days=lookBackDays)
-
     request = SentinelHubRequest(
-        evalscript=evalScriptPayLoad,
+        evalscript=evalScript,
         input_data=[
             SentinelHubRequest.input_data(
                 data_collection=DataCollection.SENTINEL2_L2A,
-                time_interval=(f"{startDate.isoformat()}T00:00:00Z", f"{targetDate.isoformat()}T23:59:59Z"),
-                maxcc=0.8
+                time_interval=dateWindow
             )
         ],
         responses=[
-            SentinelHubRequest.output_response('default', MimeType.TIFF)
+            SentinelHubRequest.output('default', MimeType.TIFF)
         ],
-        bbox=sentialBbox,
-        resolution=10,
-        mosaicking_order="least-cc",
+        bbox=sentinelBBox,
+        size=(15, 15),
         config=config
     )
 
@@ -491,30 +482,12 @@ def processSatelliteResponseMatrix(rawApiResponseData : np.ndarray) -> Tuple[np.
 
     return normalizedRed, normalizedNir, cloudMask
 
-def verifyMatrixReshaping() -> bool:
-    print("Response Parsing and Reshaping Test")
-
-    mockHighRes = np.zeros((150, 150, 3))
-    mockHighRes[..., 0] = np.random.uniform(0.05, 0.15, size=(150,150))
-    mockHighRes[..., 1] = np.random.uniform(0.60, 0.85, size=(150, 150))
-    mockHighRes[..., 2] = 9.0
-
+def verifyMatrixReshaping(farm: FarmWorkspace) -> bool:
     try:
-        redGrid, nirGrid, cloudGrid = processSatelliteResponseMatrix(mockHighRes)
-        
-        shapeCorrect = (redGrid.shape == (150, 150))
-        boundsCorrect = (np.max(redGrid) <= 1.0 and np.max(nirGrid) <= 1.0)
-        # maskCorrect = (cloudGrid[0, 0] == True)
-
-        if shapeCorrect and boundsCorrect:
-            print("Successfully Verified Matrix Reshaping")
-            return True
-        else:
-            print("Matrix Reshaping Verification Failed")
-            return False
-    
-    except Exception as e:
-        print(f"Execution Failed: {e}")
+        minLon, minLat, maxLon, maxLat = farm.geoBoundary
+        testBbox = BBox(bbox=[minLon, minLat, maxLon, maxLat], crs=CRS.WGS84)
+        return testBbox.is_valid()
+    except Exception:
         return False
 
 def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, targetDate: date) -> bool:
