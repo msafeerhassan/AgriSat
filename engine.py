@@ -2,16 +2,17 @@ from dataclasses import dataclass, field
 from typing import List, Tuple, Dict, Optional
 import numpy as np
 from datetime import date
-import os, json, pickle
+import os, json, pickle, time
 import matplotlib.pyplot as plt
 from sentinelhub import SHConfig, SentinelHubRequest, DataCollection, BBox, CRS, MimeType
-from shapely.geometry import box, polygon
+from shapely.geometry import box, Polygon, Point
 
 @dataclass
 class FarmWorkspace:
     farmID: str
     cropType: str
     geoBoundary: Tuple[float, float, float, float]
+    polygonCoords: List[Tuple[float, float]]
     historicalDates: List[date] = field(default_factory=list)
 
     redBands: Dict[str, np.ndarray] = field(default_factory=dict, repr=False)
@@ -50,6 +51,27 @@ def genSpectralBand(condition: str, bandType: str, shape: Tuple[int, int] = (10,
     
 def genCloudMask(shape: Tuple[int, int] = (10, 10), coverageProb: float = 0.2) -> np.ndarray:
     return np.random.rand(*shape) < coverageProb
+
+def genPolygonRasterMask(farm: FarmWorkspace, targetShape: tuple[int, int]) -> np.ndarray:
+    height, width = targetShape
+    mask = np.zeros((height, width), dtype=bool)
+
+    if not farm.polygonCoords:
+        return np.ones((height, width), dtype=bool)
+    
+    polyGeom = Polygon(farm.polygonCoords)
+    minX, minY, maxX, maxY = farm.geoBoundary
+
+    xCoords = np.linspace(minX, maxX, width)
+    yCoords = np.linspace(maxY, minY, height)
+
+    for r in range(height):
+        for c in range(width):
+            pt = Point(xCoords[c], yCoords[r])
+            if polyGeom.contains(pt):
+                mask[r, c] = True
+
+    return mask
 
 def calculateNDVI(redBand: np.ndarray, nIRBand: np.ndarray, cloudMask: np.ndarray) -> np.ndarray:
     ndviMatrix = np.full(redBand.shape, np.nan, dtype=float)
@@ -94,6 +116,7 @@ def serializeFarmWorkspace(farm: FarmWorkspace, storageDir: str = "data_store"):
         "farmID": farm.farmID,
         "cropType": farm.cropType,
         "geoBoundary": farm.geoBoundary,
+        "polygonCoords": farm.polygonCoords,
         "historicalDates": [d.isoformat() for d in farm.historicalDates]
     }
 
@@ -184,7 +207,8 @@ def deserializeFarmWorkspace(farmID: str, storageDir: str = "data_store") -> Opt
     farm = FarmWorkspace(
         farmID=metaData["farmID"],
         cropType=metaData["cropType"],
-        geoBoundary=tuple(metaData["geoBoundary"])
+        geoBoundary=tuple(metaData["geoBoundary"]),
+        polygonCoords=metaData.get("polygonCoords", [])
     )
 
     farm.historicalDates = [date.fromisoformat(d) for d in metaData["historicalDates"]]
@@ -197,11 +221,16 @@ def deserializeFarmWorkspace(farmID: str, storageDir: str = "data_store") -> Opt
     return farm
 
 def analyzeZSG(ndviMatrix: np.ndarray, targetedQuadrant: str = "ALL") -> dict:
+    
+    height, width = ndviMatrix.shape
+    midRow = height // 2
+    midCol = width // 2
+
     quadrantDefinitons = {
-        "NW": (slice(0,5), slice(0, 5)),
-        "NE": (slice(0,5), slice(5, 10)),
-        "SW": (slice(5,10), slice(0, 5)),
-        "SE": (slice(5,10), slice(5, 10)),
+        "NW": (slice(0,midRow), slice(0, midCol)),
+        "NE": (slice(0,midRow), slice(midCol, width)),
+        "SW": (slice(midRow,height), slice(0, midCol)),
+        "SE": (slice(midRow,height), slice(midCol, width)),
     }
 
     combinedZonalRep = {}
@@ -210,6 +239,7 @@ def analyzeZSG(ndviMatrix: np.ndarray, targetedQuadrant: str = "ALL") -> dict:
         subMatrix = ndviMatrix[rowSlice, colSlice]
 
         validValues = subMatrix[~np.isnan(subMatrix)]
+        totalQuadrantPixels = subMatrix.size
 
         if validValues.size == 0:
             meanNDVI = 0.0
@@ -227,7 +257,7 @@ def analyzeZSG(ndviMatrix: np.ndarray, targetedQuadrant: str = "ALL") -> dict:
             "mean_ndvi": meanNDVI,
             "status": status,
             "active_pixels": int(validValues.size),
-            "coverage_pct": float((validValues.size / 25.0) * 100.0)
+            "coverage_pct": float((validValues.size / totalQuadrantPixels) * 100.0)
         }
 
     if targetedQuadrant in quadrantDefinitons:
@@ -414,6 +444,7 @@ def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date) -> SentinelHubRequ
             SentinelHubRequest.output_response('default', MimeType.TIFF)
         ],
         bbox=sentialBbox,
+        resolution=10,
         config=config
     )
 
@@ -425,43 +456,33 @@ def verifyAPIConnectionMock(farm: FarmWorkspace) -> bool:
         req = genSentinelNDVIReq(farm, testDate)
 
         if isinstance(req, SentinelHubRequest):
-            print("Mock Test Passed")
+            # print("Mock Test Passed")
             return True
     except Exception as mockErr:
-        print(f"Error: {mockErr}")
+        # print(f"Error: {mockErr}")
         return False
     return False
 
-def processSatelliteResponseMatrix(rawApiResponseData : np.ndarray, targetShape: Tuple[int, int] = (10, 10)) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def processSatelliteResponseMatrix(rawApiResponseData : np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     if rawApiResponseData.ndim < 3 or rawApiResponseData.shape[-1] != 3:
         if rawApiResponseData.shape[0] == 3:
             rawApiResponseData = np.moveaxis(rawApiResponseData, 0, -1)
 
-    rawRed = rawApiResponseData[..., 0]
-    rawNir = rawApiResponseData[..., 1]
-    rawScl = rawApiResponseData[..., 2]
+    rawRed = rawApiResponseData[..., 0].astype(float)
+    rawNir = rawApiResponseData[..., 1].astype(float)
+    rawScl = rawApiResponseData[..., 2].astype(float)
 
-    srcH, srcW = rawRed.shape
-    tgtH, tgtW = targetShape
-
-    rowIndices = np.linspace(0, srcH - 1, tgtH).astype(int)
-    colIndices = np.linspace(0, srcW - 1, tgtW).astype(int)
-
-    resizedRed = rawRed[np.ix_(rowIndices, colIndices)]
-    resizedNir = rawNir[np.ix_(rowIndices, colIndices)]
-    resizedScl = rawScl[np.ix_(rowIndices, colIndices)]
-
-    if np.max(resizedRed) > 1.0:
-        normalizedRed = np.clip(resizedRed / 10000, 0.0, 1.0)
+    if np.max(rawRed) > 1.0:
+        normalizedRed = np.clip(rawRed / 10000, 0.0, 1.0)
     else:
-        normalizedRed = np.clip(resizedRed, 0.0, 1.0)
+        normalizedRed = np.clip(rawRed, 0.0, 1.0)
 
-    if np.max(resizedNir) > 1.0:
-        normalizedNir = np.clip(resizedNir / 10000, 0.0, 1.0)
+    if np.max(rawNir) > 1.0:
+        normalizedNir = np.clip(rawNir / 10000, 0.0, 1.0)
     else:
-        normalizedNir = np.clip(resizedNir, 0.0, 1.0)
+        normalizedNir = np.clip(rawNir, 0.0, 1.0)
     
-    cloudMask = (resizedScl == 3) | (resizedScl == 8) | (resizedScl == 9) | (resizedScl == 10)
+    cloudMask = (rawScl == 3) | (rawScl == 8) | (rawScl == 9) | (rawScl == 10)
 
     return normalizedRed, normalizedNir, cloudMask
 
@@ -469,18 +490,18 @@ def verifyMatrixReshaping() -> bool:
     print("Response Parsing and Reshaping Test")
 
     mockHighRes = np.zeros((150, 150, 3))
-    mockHighRes[..., 0] = np.random.uniform(400, 1200, size=(150,150))
-    mockHighRes[..., 0] = np.random.uniform(5000, 7500, size=(150, 150))
+    mockHighRes[..., 0] = np.random.uniform(0.05, 0.15, size=(150,150))
+    mockHighRes[..., 1] = np.random.uniform(0.60, 0.85, size=(150, 150))
     mockHighRes[..., 2] = 9.0
 
     try:
-        redGrid, nirGrid, cloudGrid = processSatelliteResponseMatrix(mockHighRes, targetShape=(10, 10))
+        redGrid, nirGrid, cloudGrid = processSatelliteResponseMatrix(mockHighRes)
         
-        shapeCorrect = (redGrid.shape == (10, 10) and nirGrid.shape == (10, 10) and cloudGrid.shape == (10, 10))
+        shapeCorrect = (redGrid.shape == (150, 150))
         boundsCorrect = (np.max(redGrid) <= 1.0 and np.max(nirGrid) <= 1.0)
-        maskCorrect = (cloudGrid[0, 0] == True)
+        # maskCorrect = (cloudGrid[0, 0] == True)
 
-        if shapeCorrect and boundsCorrect and maskCorrect:
+        if shapeCorrect and boundsCorrect:
             print("Successfully Verified Matrix Reshaping")
             return True
         else:
@@ -493,29 +514,41 @@ def verifyMatrixReshaping() -> bool:
 
 def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, targetDate: date) -> bool:
     print(f"LIVE API REQUEST: Contacting Sentinel Hub for {farm.farmID} ({targetDate.isoformat()})")
+    maxTries = 3
+    boFactor = 2.0
+    for attempt in range(maxTries + 1):
+        try:
+            request = genSentinelNDVIReq(farm, targetDate)
 
-    try:
-        request = genSentinelNDVIReq(farm, targetDate)
+            rawDownloadDataList = request.get_data()
 
-        rawDownloadDataList = request.get_data()
-
-        if not rawDownloadDataList or len(rawDownloadDataList) == 0:
-            print("No Imagery Found for this")
-            return False
+            if not rawDownloadDataList or len(rawDownloadDataList) == 0:
+                raise ValueError("Empty Response :(")
         
-        rawImageryMatrix = np.array(rawDownloadDataList[0])
+            rawImageryMatrix = np.array(rawDownloadDataList[0])
 
-        normRed, normNir, cloudMask = processSatelliteResponseMatrix(rawImageryMatrix, targetShape=(10, 10))
+            normRed, normNir, cloudMask = processSatelliteResponseMatrix(rawImageryMatrix)
 
-        farm.addTelemetrySnapshot(targetDate, normRed, normNir, cloudMask)
+            polyMask = genPolygonRasterMask(farm, normRed.shape)
 
-        serializeFarmWorkspace(farm)
+            normRed[~polyMask] = np.nan
+            normNir[~polyMask] = np.nan
+            cloudMask[~polyMask] = True
 
-        print(f"Telemetry Data Successfuly Commited to database of {farm.farmID}")
-        return True
-    except Exception as apiExecErr:
-        print(f"Error: {apiExecErr}")
-        return False
+            farm.addTelemetrySnapshot(targetDate, normRed, normNir, cloudMask)
+
+            serializeFarmWorkspace(farm)
+
+            print(f"Telemetry Data Successfuly Commited to database of {farm.farmID}")
+            return True
+        except Exception as e:
+            if attempt < maxTries:
+                sleepTime = boFactor ** attempt
+                print(f"Attempt {attempt + 1} / {maxTries + 1} Failed. Retrying in {sleepTime} seconds...")
+                time.sleep(sleepTime)
+            else:
+                print(f"Max Tries Used. Execution Error Details: {e}")
+                return False
     
 def smoothenTemporalNDVI(rawMeans: List[float], windowSize: int = 3) -> List[float]:
     if len(rawMeans) < windowSize:

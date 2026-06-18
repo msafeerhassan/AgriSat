@@ -2,7 +2,7 @@ import sys, os
 from datetime import date, timedelta
 import numpy as np
 from dotenv import load_dotenv
-from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport, verifySentinelCredentials, genSentinelNDVIReq, verifyAPIConnectionMock, verifyMatrixReshaping, downloadAndRegisterSatelliteTelemetry, smoothenTemporalNDVI, predictFutureNDVI
+from engine import FarmWorkspace, genCloudMask, genSpectralBand, calculateNDVI, renderGridMask, temporalTLSweeper, excludeAnomolies, serializeFarmWorkspace, exportNDVIHeatMap, deserializeFarmWorkspace, analyzeZSG, genHistoricalRep, exportDetailedFarmReport, verifySentinelCredentials, genSentinelNDVIReq, verifyAPIConnectionMock, verifyMatrixReshaping, downloadAndRegisterSatelliteTelemetry, smoothenTemporalNDVI, predictFutureNDVI, genPolygonRasterMask
 from utils import displayTabSummary
 
 load_dotenv()
@@ -26,31 +26,51 @@ def seedInitWorkspace() -> dict:
     
     print("No saved record found. Using Dummy Data")
 
-    cropTypes = ["Rice", "Wheat", "Cotton"]
+    realFarmGeometries = {
+        "FARM-0001": {
+            "crop": "Rice",
+            "bounds": (73.3500, 30.3400, 73.3600, 30.3500),
+            "poly": [(73.3510, 30.3410), (73.3590, 30.3420), (73.3580, 30.3490), (73.3520, 30.3480)]
+        },
+        "FARM-0002": {
+            "crop": "Wheat",
+            "bounds": (73.3800, 30.3600, 73.3900, 30.3700),
+            "poly": [(73.3820, 30.3620), (73.3880, 30.3630), (73.3870, 30.3680), (73.3810, 30.3670)]
+        },
+        "FARM-0003": {
+            "crop" : "Cotton",
+            "bounds": (74.2200, 31.4500, 74.2300, 31.4600),
+            "poly": [(74.2210, 31.4510), (74.2290, 31.4520), (74.2280, 31.4590), (74.2220, 31.4580)]
+        }
+    }
 
-    for i, crop in enumerate(cropTypes, 1):
-        fID = f"FARM-000{i}"
+    for fID, info in realFarmGeometries.items():
         farm = FarmWorkspace(
             farmID=fID,
-            cropType=crop,
-            geoBoundary=(34+i*0.01, -118.24, 34.06 + i*0.01, -118.23)
+            cropType=info["crop"],
+            geoBoundary=info["bounds"],
+            polygonCoords=info["poly"]
         )
 
-        baseDate = date(2026, 5, 1)
+        verifyAPIConnectionMock(farm)
 
-        for week in range(5):
-            snapDate = baseDate + timedelta(weeks=week)
-            if fID == "FARM-0001" and week == 4:
-                red = genSpectralBand("stressed", "red")
-                nir = genSpectralBand("stressed", "nir")
-            else:
-                red = genSpectralBand("healthy", "red")
-                nir = genSpectralBand("healthy", "nir")
-            
-            mask = genCloudMask(coverageProb=0.1)
-            farm.addTelemetrySnapshot(snapDate, red, nir, mask)
-            serializeFarmWorkspace(farm)
-            registry[fID] = farm
+        baseShape = (10, 10)
+        pMask = genPolygonRasterMask(farm, baseShape)
+
+        for days in [20, 15, 10, 5]:
+            snapDate = date.today() - timedelta(days=days)
+            hRed = genSpectralBand("healthy", "red", baseShape)
+            hNir = genSpectralBand("healthy", "nir", baseShape)
+            cMask = genCloudMask(baseShape, coverageProb=0.0)
+
+            hRed[~pMask] = np.nan
+            hNir[~pMask] = np.nan
+            cMask[~pMask] = True
+
+            farm.addTelemetrySnapshot(snapDate, hRed, hNir, cMask)
+
+        serializeFarmWorkspace(farm)
+        registry[fID] = farm
     return registry
 
 def runInteractiveDashboard():
