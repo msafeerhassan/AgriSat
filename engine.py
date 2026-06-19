@@ -8,6 +8,9 @@ import matplotlib.pyplot as plt
 from sentinelhub import SHConfig, SentinelHubRequest, DataCollection, BBox, CRS, MimeType, SentinelHubDownloadClient
 from shapely.geometry import box, Polygon, Point
 
+GRID_RESOLUTION: Tuple[int, int] = (15, 15)
+
+
 @dataclass
 class FarmWorkspace:
     farmID: str
@@ -98,6 +101,12 @@ def calculateNDVI(redBand: np.ndarray, nIRBand: np.ndarray, cloudMask: np.ndarra
 
     ndviMatrix[validPixels] = computedNDVI
     return ndviMatrix
+
+
+def genCloudMaskFromSCL(sclArray: np.ndarray) -> np.ndarray:
+    noDataPixels = (sclArray == 0)
+    cloudPixels = (sclArray == 3) | (sclArray == 8) | (sclArray == 9) | (sclArray == 10)
+    return cloudPixels | noDataPixels
 
 def renderGridMask(ndviMatrix: np.ndarray) -> List[str]:
     renderedRows = []
@@ -389,6 +398,28 @@ def verifySentinelCredentials() -> bool:
         print(f"Error in Sentinel Hub Credentials Initialization: {e}")
         return False
 
+def verifyLiveSentinelCredentials(clientID: str, clientSecret: str) -> Tuple[bool, str]:
+    if not clientID or not clientSecret:
+        return False, "Credentials Missing"
+    
+    try:
+        config = SHConfig()
+        config.sh_client_id = clientID
+        config.sh_client_secret = clientSecret
+
+        client = SentinelHubDownloadClient(config=config)
+        client.get_json(
+            url="https://services.sentinel-hub.com/oauth/token",
+            post_values={
+                "grant_type": "client_credentials",
+                "client_id": clientID,
+                "client_secret": clientSecret,
+            },
+        )
+        return True, "Connected"
+    except Exception as authErr:
+        return False, f"Authentication Failed: {authErr}"
+
 def validateAndStandardizeBBox(bboxTuple: Tuple[float, float, float, float] , crsFormat: str = "EPSG:4326") -> dict:
     if len(bboxTuple) != 4:
         raise ValueError("Geospatial Boundaries are supposed to be 4-tuple sequence of floats")
@@ -459,47 +490,11 @@ def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date, config: SHConfig, 
             SentinelHubRequest.output_response('default', MimeType.TIFF)
         ],
         bbox=sentinelBBox,
-        size=(15, 15),
+        size=GRID_RESOLUTION,
         config=config
     )
 
     return request
-
-def verifyAPIConnectionMock(farm: FarmWorkspace) -> bool:
-    try:
-        testDate = date(2026, 6, 15)
-        req = genSentinelNDVIReq(farm, testDate)
-
-        if isinstance(req, SentinelHubRequest):
-            # print("Mock Test Passed")
-            return True
-    except Exception as mockErr:
-        # print(f"Error: {mockErr}")
-        return False
-    return False
-
-def processSatelliteResponseMatrix(rawApiResponseData : np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    if rawApiResponseData.ndim < 3 or rawApiResponseData.shape[-1] != 3:
-        if rawApiResponseData.shape[0] == 3:
-            rawApiResponseData = np.moveaxis(rawApiResponseData, 0, -1)
-
-    rawRed = rawApiResponseData[..., 0].astype(float)
-    rawNir = rawApiResponseData[..., 1].astype(float)
-    rawScl = rawApiResponseData[..., 2].astype(float)
-
-    if np.max(rawRed) > 1.0:
-        normalizedRed = np.clip(rawRed / 10000, 0.0, 1.0)
-    else:
-        normalizedRed = np.clip(rawRed, 0.0, 1.0)
-
-    if np.max(rawNir) > 1.0:
-        normalizedNir = np.clip(rawNir / 10000, 0.0, 1.0)
-    else:
-        normalizedNir = np.clip(rawNir, 0.0, 1.0)
-    
-    cloudMask = (rawScl == 3) | (rawScl == 8) | (rawScl == 9) | (rawScl == 10)
-
-    return normalizedRed, normalizedNir, cloudMask
 
 def verifyMatrixReshaping(farm: FarmWorkspace) -> bool:
     try:
@@ -519,7 +514,7 @@ def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, cl
     config.sh_client_id = clientID
     config.sh_client_secret = clientSecret
 
-    polyMask = genPolygonRasterMask(farm, (15, 15))
+    polyMask = genPolygonRasterMask(farm, GRID_RESOLUTION)
     successCount = 0
 
     print(f"Starting data download from Sentinel-2 for {farm.farmID}")
@@ -544,14 +539,13 @@ def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, cl
             redArr = np.clip(redArr, 0.0, 1.0)
             nirArr = np.clip(nirArr, 0.0, 1.0)
 
-            cloudPixels = (sclArr == 8) | (sclArr == 9) | (sclArr == 10) | (sclArr == 3)
+            cloudPixels = genCloudMaskFromSCL(sclArr)
             noDataPixels = (sclArr == 0)
-            cloudPixels = cloudPixels | noDataPixels
 
             if np.all(noDataPixels):
                 print(f"Entire Scene is NO Data for {snapDate} - likely no imagery acquisition in this window")
 
-            totalPixels = 15 * 15
+            totalPixels = GRID_RESOLUTION[0] * GRID_RESOLUTION[1]
             cloudPct = np.sum(cloudPixels) / totalPixels
 
             if cloudPct > 0.70:

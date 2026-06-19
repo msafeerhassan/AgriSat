@@ -22,7 +22,8 @@ from engine import (
     predictFutureNDVI,
     exportDetailedFarmReport,
     verifySentinelCredentials,
-    downloadAndRegisterSatelliteTelemetry
+    downloadAndRegisterSatelliteTelemetry,
+    verifyLiveSentinelCredentials
 )
 from dotenv import load_dotenv
 import warnings
@@ -66,15 +67,12 @@ with st.sidebar.spinner("Checking SentinelHub Connection..."):
     clientID = os.getenv("CLIENT_ID")
     clientSecret = os.getenv("CLIENT_SECRET")
 
-    if not clientID or not clientSecret:
-        st.sidebar.error("Credentials Missing :(")
-        connectionValidity = False
+    connectionValidity, connectionMessage = verifyLiveSentinelCredentials(clientID, clientSecret)
+
+    if connectionValidity:
+        st.sidebar.success(f"SentinelHub API: {connectionMessage}")
     else:
-        connectionValidity = True
-        if connectionValidity:
-            st.sidebar.success("SentinelHub API: Connected")
-        else:
-            st.sidebar.error("SentinelHub API: Authentication Failed")
+        st.sidebar.error(f"SentinelHub API: {connectionMessage}")
 
 st.sidebar.divider()
 
@@ -187,7 +185,7 @@ if actionMode == "Active Farm Analytics Board":
                         z_index = 1
                     ).add_to(tileMap)
                 except Exception as overlayErr:
-                    st.warning(f"Could Not render NDVI Overlay:", overlayErr)
+                    st.warning(f"Could Not render NDVI Overlay: {overlayErr}")
                 st_folium(
                     tileMap,
                     width=550,
