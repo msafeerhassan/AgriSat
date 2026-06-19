@@ -10,6 +10,21 @@ from shapely.geometry import box, Polygon, Point
 
 GRID_RESOLUTION: Tuple[int, int] = (15, 15)
 
+def fetchWithRetry(requestFn, maxAttempts: int = 3, baseDelaySeconds: float = 2.0):
+    lastError = None
+    for attempt in range(1, maxAttempts + 1):
+        try:
+            return requestFn()
+        except Exception as fetchErr:
+            lastError = fetchErr
+            if attempt < maxAttempts:
+                sleepFor = baseDelaySeconds * (2 ** (attempt - 1))
+                print(f"Attempt {attempt}/{maxAttempts} failed: {fetchErr}. Retrying in {sleepFor:.1f}s...")
+                time.sleep(sleepFor)
+            else:
+                print(f"ALL {maxAttempts} ATTEMPTS FAILED :(")
+    
+    raise lastError
 
 @dataclass
 class FarmWorkspace:
@@ -504,11 +519,17 @@ def verifyMatrixReshaping(farm: FarmWorkspace) -> bool:
     except Exception:
         return False
 
-def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, clientSecret:str) -> bool:
+def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, clientSecret:str) -> dict:
+    perDateResults = []
     if not clientID or not clientSecret:
         print("SentinelHub Credentials Missing :(")
-        return False
-    
+        return {
+            "success": False,
+            "successCount": 0,
+            "totalAttempted": 0,
+            "perDate": perDateResults
+        }
+
     config = SHConfig()
     config.instance_id = clientID
     config.sh_client_id = clientID
@@ -516,20 +537,25 @@ def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, cl
 
     polyMask = genPolygonRasterMask(farm, GRID_RESOLUTION)
     successCount = 0
+    print(f"Starting data Download from Sentinel 2 for {farm.farmID}")
 
-    print(f"Starting data download from Sentinel-2 for {farm.farmID}")
+    lookBackDays = list(range(30, 0, -5))
 
-    for lookback in range(30, 0, -5):
-        snapDate = date.today() - timedelta(days=lookback)
+    for lookBack in lookBackDays:
+        snapDate = date.today() - timedelta(days=lookBack)
+        dateStr = snapDate.isoformat()
         try:
             request = genSentinelNDVIReq(farm, snapDate, config)
-
-            rawDataList = request.get_data()
+            rawDataList = fetchWithRetry(lambda: request.get_data())
 
             if not rawDataList or len(rawDataList) == 0:
                 print(f"No Telemetry Data Found for Date: {snapDate}")
+                perDateResults.append({
+                    "date": dateStr,
+                    "status": "no_data"
+                })
                 continue
-
+            
             matrixFrame = rawDataList[0]
 
             redArr = matrixFrame[:, :, 0].astype(float)
@@ -543,32 +569,53 @@ def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, cl
             noDataPixels = (sclArr == 0)
 
             if np.all(noDataPixels):
-                print(f"Entire Scene is NO Data for {snapDate} - likely no imagery acquisition in this window")
-
+                print(f"Entire Scene is NO Data for {snapDate}")
+                perDateResults.append({
+                    "date": dateStr,
+                    "status": "no_data"
+                })
+                continue
             totalPixels = GRID_RESOLUTION[0] * GRID_RESOLUTION[1]
-            cloudPct = np.sum(cloudPixels) / totalPixels
-
+            cloudPct = float(np.sum(cloudPixels) / totalPixels)
             if cloudPct > 0.70:
                 print(f"Too Cloudy on {snapDate} ({cloudPct:.1%})")
+                perDateResults.append({
+                    "date": dateStr,
+                    "status": "too_cloudy",
+                    "cloudPct": cloudPct
+                })
                 continue
-
             invalidPixels = cloudPixels | (~polyMask)
             redArr[invalidPixels] = np.nan
             nirArr[invalidPixels] = np.nan
 
             farm.addTelemetrySnapshot(snapDate, redArr, nirArr, invalidPixels)
             successCount += 1
-
             ndviTest = calculateNDVI(redArr, nirArr, invalidPixels)
             meanNDVI = float(np.nanmean(ndviTest))
 
             print(f"Successfully Fetched Sentinel Data for {farm.farmID} of date {snapDate} - Mean NDVI: {meanNDVI:.4f} | Valid Pixels: {np.sum(~np.isnan(ndviTest))}")
+            perDateResults.append({
+                "date": dateStr,
+                "status": "fetched",
+                "meanNDVI": meanNDVI,
+                "cloudPct": cloudPct
+            })
         except Exception as e:
             print(f"SentinelHub Download Failed on {snapDate}: {e}")
+            perDateResults.append({
+                "date": dateStr,
+                "status": "error",
+                "message": str(e)
+            })
             continue
-    print(f"Download Complete. {successCount} successfull snapshots fetched.")
-    return successCount > 0
-    
+    print(f"Download Complete: {successCount} successfull Snapshots Fetched")
+    return{
+        "success": successCount > 0,
+        "successCount": successCount,
+        "totalAttempted": len(lookBackDays),
+        "perDate": perDateResults
+    }
 def smoothenTemporalNDVI(rawMeans: List[float], windowSize: int = 3) -> List[float]:
     if len(rawMeans) < windowSize:
         return rawMeans

@@ -326,11 +326,40 @@ elif actionMode == "Register & Draw New Farm Boundary":
                             clientID = os.getenv("CLIENT_ID")
                             clientSecret = os.getenv("CLIENT_SECRET")
 
-                            hasTelemtry= downloadAndRegisterSatelliteTelemetry(newFarm, clientID, clientSecret)
+                            downloadResult = downloadAndRegisterSatelliteTelemetry(newFarm, clientID, clientSecret)
 
-                            if hasTelemtry:
+                            if downloadResult["success"]:
                                 serializeFarmWorkspace(newFarm, storageDir=STORAGE_DIR)
-                                st.success(f"Workspace {farmIDInput} successfully Linked With Active Satellite Feeds!")
+                                st.success(f"Workspace {farmIDInput} successfully Linked with Active Satellite Feed!")
                                 st.balloons()
                             else:
-                                st.error("Failed to fetch Satellite Data :(")
+                                st.error("Failed to Fetch Satellite Data :(")
+                            
+                            st.markdown("#### Satellite Fetch Summary")
+                            st.caption(
+                                f"{downloadResult['successCount']}/{downloadResult['totalAttempted']} dates fetched successfully."
+                            )
+
+                            statusLabels = {
+                                "fetched": "Fetched :)",
+                                "too_cloudy": "Too Cloudy :(",
+                                "no_data": "NO DATA :(",
+                                "error": "Error :("
+                            }
+
+                            summaryRows = []
+                            for entry in downloadResult["perDate"]:
+                                row = {
+                                    "Date": entry["date"],
+                                    "Status": statusLabels.get(entry["status"], entry["status"]),
+                                }
+
+                                if entry["status"] == "fetched":
+                                    row["Mean NDVI"] = f"{entry['meanNDVI']:.4f}"
+                                    row["Cloud %"] = f"{entry['cloudPct']:.1%}"
+                                elif entry["status"] == "too_cloudy":
+                                    row["Cloud %"] = f"{entry['cloudPct']:.1%}"
+                                elif entry["status"] == "error":
+                                    row["Detail"] = entry["message"]
+                                summaryRows.append(row)
+                            st.dataframe(summaryRows, use_container_width=True)
