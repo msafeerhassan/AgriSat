@@ -5,7 +5,7 @@ from datetime import date
 import os, json, pickle, time
 from datetime import timedelta
 import matplotlib.pyplot as plt
-from sentinelhub import SHConfig, SentinelHubRequest, DataCollection, BBox, CRS, MimeType
+from sentinelhub import SHConfig, SentinelHubRequest, DataCollection, BBox, CRS, MimeType, SentinelHubDownloadClient
 from shapely.geometry import box, Polygon, Point
 
 @dataclass
@@ -437,7 +437,7 @@ def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date, config: SHConfig) 
             )
         ],
         responses=[
-            SentinelHubRequest.output('default', MimeType.TIFF)
+            SentinelHubRequest.output_response('default', MimeType.TIFF)
         ],
         bbox=sentinelBBox,
         size=(15, 15),
@@ -490,43 +490,53 @@ def verifyMatrixReshaping(farm: FarmWorkspace) -> bool:
     except Exception:
         return False
 
-def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, targetDate: date) -> bool:
-    print(f"LIVE API REQUEST: Contacting Sentinel Hub for {farm.farmID} ({targetDate.isoformat()})")
-    maxTries = 3
-    boFactor = 2.0
-    for attempt in range(maxTries + 1):
+def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, clientSecret:str) -> bool:
+    config = SHConfig()
+    config.instance_id = clientID
+    config.sh_client_id = clientID
+    config.sh_client_secret = clientSecret
+
+    polyMask = genPolygonRasterMask(farm, (15, 15))
+    successCount = 0
+
+    for lookback in range(30, 0, -5):
+        snapDate = date.today() - timedelta(days=lookback)
         try:
-            request = genSentinelNDVIReq(farm, targetDate)
+            request = genSentinelNDVIReq(farm, snapDate, config)
 
-            rawDownloadDataList = request.get_data()
+            rawDataList = request.get_data()
 
-            if not rawDownloadDataList or len(rawDownloadDataList) == 0:
-                raise ValueError("Empty Response :(")
-        
-            rawImageryMatrix = np.array(rawDownloadDataList[0])
+            if not rawDataList or len(rawDataList) == 0:
+                print(f"No Telemetry Data Found for Date: {snapDate}")
+                continue
 
-            normRed, normNir, cloudMask = processSatelliteResponseMatrix(rawImageryMatrix)
+            matrixFrame = rawDataList[0]
 
-            polyMask = genPolygonRasterMask(farm, normRed.shape)
+            redArr = matrixFrame[:, :, 0]
+            nirArr = matrixFrame[:, :, 1]
+            sclArr = matrixFrame[:, :, 2]
 
-            normRed[~polyMask] = np.nan
-            normNir[~polyMask] = np.nan
-            cloudMask[~polyMask] = True
+            cloudPixels = (sclArr == 8) | (sclArr == 9) | (sclArr == 10)
 
-            farm.addTelemetrySnapshot(targetDate, normRed, normNir, cloudMask)
+            totalPixels = 15 * 15
+            cloudPct = np.sum(cloudPixels) / totalPixels
 
-            serializeFarmWorkspace(farm)
+            if cloudPct > 0.60:
+                continue
 
-            print(f"Telemetry Data Successfuly Commited to database of {farm.farmID}")
-            return True
+            redArr[cloudPixels] = np.nan
+            nirArr[cloudPixels] = np.nan
+
+            redArr[~polyMask] = np.nan
+            nirArr[~polyMask] = np.nan
+
+            farm.addTelemetrySnapshot(snapDate, redArr, nirArr, cloudPixels)
+
+            successCount += 1
         except Exception as e:
-            if attempt < maxTries:
-                sleepTime = boFactor ** attempt
-                print(f"Attempt {attempt + 1} / {maxTries + 1} Failed. Retrying in {sleepTime} seconds...")
-                time.sleep(sleepTime)
-            else:
-                print(f"Max Tries Used. Execution Error Details: {e}")
-                return False
+            print(f"SentinelHub Download Failed on {snapDate}: {e}")
+            continue
+    return successCount > 0
     
 def smoothenTemporalNDVI(rawMeans: List[float], windowSize: int = 3) -> List[float]:
     if len(rawMeans) < windowSize:

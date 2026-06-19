@@ -21,7 +21,8 @@ from engine import (
     genHistoricalRep,
     predictFutureNDVI,
     exportDetailedFarmReport,
-    verifySentinelCredentials
+    verifySentinelCredentials,
+    downloadAndRegisterSatelliteTelemetry
 )
 from dotenv import load_dotenv
 
@@ -120,7 +121,7 @@ if actionMode == "Active Farm Analytics Board":
                 latestCleanMean = float(np.nanmean(ndviMatrix)) if not np.all(np.isnan(ndviMatrix)) else 0.0
                 st.metric("Latest Field State Mean NDVI", f"{latestCleanMean:.4f}")
             with mCol3:
-                st.metric("Trend Trajectory State", trendRep.get("trajectory", "Stable"))
+                st.metric("Trend Trajectory State", trendRep.get("assessment", "Stable"))
 
             st.divider()
 
@@ -285,7 +286,7 @@ elif actionMode == "Register & Draw New Farm Boundary":
                     if not farmIDInput or not cropTypeInput:
                         st.error("Validation Rejected. Please enter Farm ID and Crop Type.")
                     else:
-                        with st.spinner("Processing Data..."):
+                        with st.spinner("Fetching real telemetry data from SentinelHub API..."):
                             longitudes = [pt[0] for pt in formattedCoords]
                             latitudes = [pt[1] for pt in formattedCoords]
                             computedBbox = (min(longitudes), min(latitudes), max(longitudes), max(latitudes))
@@ -297,23 +298,30 @@ elif actionMode == "Register & Draw New Farm Boundary":
                                 polygonCoords=formattedCoords
                             )
 
-                            gridShape = (15, 15)
+                            clientID = os.getenv("CLIENT_ID")
+                            clientSecret = os.getenv("CLIENT_SECRET")
 
-                            polyMask = genPolygonRasterMask(newFarm, gridShape)
+                            hasTelemtry= downloadAndRegisterSatelliteTelemetry(newFarm, clientID, clientSecret)
 
-                            for lookback in [20, 15, 10, 5]:
-                                snapDate = date.today() - timedelta(days=lookback)
+                            if hasTelemtry:
+                                serializeFarmWorkspace(newFarm, storageDir=STORAGE_DIR)
+                                st.success(f"Workspace {farmIDInput} successfully Linked With Active Satellite Feeds!")
+                                st.balloons()
+                            else:
+                                st.warning("Connected successfully but no imagery fetch - using mock data :(")
+                                gridShape = (15, 15)
+                                polyMask = genPolygonRasterMask(newFarm, gridShape)
+                                for lookback in [20, 15, 10, 5]:
+                                    snapDate = date.today() - timedelta(days=lookback)
 
-                                rBand = genSpectralBand("healthy", "red", gridShape)
-                                nirBand = genSpectralBand("healthy", "nir", gridShape)
-                                cMask = genCloudMask(gridShape, coverageProb=0.0)
+                                    rBand = genSpectralBand("healthy", "red", gridShape)
+                                    nirBand = genSpectralBand("healthy", "nir", gridShape)
+                                    cMask = genCloudMask(gridShape, coverageProb=0.0)
 
-                                rBand[~polyMask] = np.nan
-                                nirBand[~polyMask] = np.nan
-                                cMask[~polyMask] = True
+                                    rBand[~polyMask] = np.nan
+                                    nirBand[~polyMask] = np.nan
+                                    cMask[~polyMask] = True
 
-                                newFarm.addTelemetrySnapshot(snapDate, rBand, nirBand, cMask)
+                                    newFarm.addTelemetrySnapshot(snapDate, rBand, nirBand, cMask)
                             
-                            serializeFarmWorkspace(newFarm, storageDir=STORAGE_DIR)
-                            st.success(f"Farm {farmIDInput} saved successfully!")
-                            st.balloons()
+                                serializeFarmWorkspace(newFarm, storageDir=STORAGE_DIR)
