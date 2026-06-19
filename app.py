@@ -308,20 +308,4 @@ elif actionMode == "Register & Draw New Farm Boundary":
                                 st.success(f"Workspace {farmIDInput} successfully Linked With Active Satellite Feeds!")
                                 st.balloons()
                             else:
-                                st.warning("Connected successfully but no imagery fetch - using mock data :(")
-                                gridShape = (15, 15)
-                                polyMask = genPolygonRasterMask(newFarm, gridShape)
-                                for lookback in [20, 15, 10, 5]:
-                                    snapDate = date.today() - timedelta(days=lookback)
-
-                                    rBand = genSpectralBand("healthy", "red", gridShape)
-                                    nirBand = genSpectralBand("healthy", "nir", gridShape)
-                                    cMask = genCloudMask(gridShape, coverageProb=0.0)
-
-                                    rBand[~polyMask] = np.nan
-                                    nirBand[~polyMask] = np.nan
-                                    cMask[~polyMask] = True
-
-                                    newFarm.addTelemetrySnapshot(snapDate, rBand, nirBand, cMask)
-                            
-                                serializeFarmWorkspace(newFarm, storageDir=STORAGE_DIR)
+                                st.error("Failed to fetch Satellite Data :(")

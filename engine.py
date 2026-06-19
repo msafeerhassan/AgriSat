@@ -63,15 +63,22 @@ def genPolygonRasterMask(farm: FarmWorkspace, targetShape: tuple[int, int]) -> n
     polyGeom = Polygon(farm.polygonCoords)
     minX, minY, maxX, maxY = farm.geoBoundary
 
-    xCoords = np.linspace(minX, maxX, width)
-    yCoords = np.linspace(maxY, minY, height)
+    buffer = 0.00001
+
+    xCoords = np.linspace(minX - buffer, maxX + buffer, width)
+    yCoords = np.linspace(maxY + buffer, minY - buffer, height)
 
     for r in range(height):
         for c in range(width):
             pt = Point(xCoords[c], yCoords[r])
-            if polyGeom.contains(pt):
+            if polyGeom.contains(pt) or polyGeom.intersects(pt):
                 mask[r, c] = True
-
+            
+    if np.sum(mask) < 5:
+        print("Weak Polygon Mask Detected")
+        mask = np.ones((height, width), dtype=bool)
+    
+    print(f"Polygon Mask Created: {np.sum(mask)}/{height*width} pixels inside boundary")
     return mask
 
 def calculateNDVI(redBand: np.ndarray, nIRBand: np.ndarray, cloudMask: np.ndarray) -> np.ndarray:
@@ -258,6 +265,7 @@ def analyzeZSG(ndviMatrix: np.ndarray, targetedQuadrant: str = "ALL") -> dict:
             "mean_ndvi": meanNDVI,
             "status": status,
             "active_pixels": int(validValues.size),
+            "total_pixels": int(totalQuadrantPixels),
             "coverage_pct": float((validValues.size / totalQuadrantPixels) * 100.0)
         }
 
@@ -355,7 +363,7 @@ def exportDetailedFarmReport(farm: FarmWorkspace, trendReport: dict, zonalReport
         for quad, metrics in zonalReport.items():
             tf.write(f"Sector: {quad}\n")
             tf.write(f"Mean NDVI: {metrics['mean_ndvi']:.4f}\n")
-            tf.write(f"Clean Pixel Count: {metrics['active_pixels']}/25\n")
+            tf.write(f"Clean Pixel Count: {metrics['active_pixels']}/{metrics.get("total_pixels", metrics['active_pixels'])}\n")
             tf.write(f"Canopy Density: {metrics['coverage_pct']}%\n")
             tf.write(f"Sector Status: {metrics['status']}\n")
         tf.write("-" * 50 +"\n")
@@ -401,21 +409,31 @@ def validateAndStandardizeBBox(bboxTuple: Tuple[float, float, float, float] , cr
         "area_deg_sq": spatialEnv.area
     }
 
-def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date, config: SHConfig) -> SentinelHubRequest:
+def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date, config: SHConfig, windowDays: int = 4) -> SentinelHubRequest:
     minLon, minLat, maxLon, maxLat = farm.geoBoundary
     
     sentinelBBox = BBox(bbox=[minLon, minLat, maxLon, maxLat], crs=CRS.WGS84)
 
-    dateWindow = (targetDate.isoformat(), targetDate.isoformat())
+    windowStart = (targetDate - timedelta(days=windowDays)).isoformat()
+    windowEnd = (targetDate + timedelta(days=windowDays)).isoformat()
+
+    dateWindow = (windowStart, windowEnd)
 
     evalScript = """
     function setup() {
         return {
-            input: [
-                "B04",
-                "B08",
-                "SCL"
-            ],
+            input: [{
+                bands: [
+                    "B04",
+                    "B08",
+                    "SCL"
+                ],
+                units: [
+                    "REFLECTANCE",
+                    "REFLECTANCE",
+                    "DN"
+                ]
+            }],
             output: {
                 bands: 3,
                 sampleType: "FLOAT32"
@@ -433,7 +451,8 @@ def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date, config: SHConfig) 
         input_data=[
             SentinelHubRequest.input_data(
                 data_collection=DataCollection.SENTINEL2_L2A,
-                time_interval=dateWindow
+                time_interval=dateWindow,
+                mosaicking_order = 'leastCC'
             )
         ],
         responses=[
@@ -491,6 +510,10 @@ def verifyMatrixReshaping(farm: FarmWorkspace) -> bool:
         return False
 
 def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, clientSecret:str) -> bool:
+    if not clientID or not clientSecret:
+        print("SentinelHub Credentials Missing :(")
+        return False
+    
     config = SHConfig()
     config.instance_id = clientID
     config.sh_client_id = clientID
@@ -498,6 +521,8 @@ def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, cl
 
     polyMask = genPolygonRasterMask(farm, (15, 15))
     successCount = 0
+
+    print(f"Starting data download from Sentinel-2 for {farm.farmID}")
 
     for lookback in range(30, 0, -5):
         snapDate = date.today() - timedelta(days=lookback)
@@ -512,30 +537,42 @@ def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, cl
 
             matrixFrame = rawDataList[0]
 
-            redArr = matrixFrame[:, :, 0]
-            nirArr = matrixFrame[:, :, 1]
+            redArr = matrixFrame[:, :, 0].astype(float)
+            nirArr = matrixFrame[:, :, 1].astype(float)
             sclArr = matrixFrame[:, :, 2]
 
-            cloudPixels = (sclArr == 8) | (sclArr == 9) | (sclArr == 10)
+            redArr = np.clip(redArr, 0.0, 1.0)
+            nirArr = np.clip(nirArr, 0.0, 1.0)
+
+            cloudPixels = (sclArr == 8) | (sclArr == 9) | (sclArr == 10) | (sclArr == 3)
+            noDataPixels = (sclArr == 0)
+            cloudPixels = cloudPixels | noDataPixels
+
+            if np.all(noDataPixels):
+                print(f"Entire Scene is NO Data for {snapDate} - likely no imagery acquisition in this window")
 
             totalPixels = 15 * 15
             cloudPct = np.sum(cloudPixels) / totalPixels
 
-            if cloudPct > 0.60:
+            if cloudPct > 0.70:
+                print(f"Too Cloudy on {snapDate} ({cloudPct:.1%})")
                 continue
 
-            redArr[cloudPixels] = np.nan
-            nirArr[cloudPixels] = np.nan
+            invalidPixels = cloudPixels | (~polyMask)
+            redArr[invalidPixels] = np.nan
+            nirArr[invalidPixels] = np.nan
 
-            redArr[~polyMask] = np.nan
-            nirArr[~polyMask] = np.nan
-
-            farm.addTelemetrySnapshot(snapDate, redArr, nirArr, cloudPixels)
-
+            farm.addTelemetrySnapshot(snapDate, redArr, nirArr, invalidPixels)
             successCount += 1
+
+            ndviTest = calculateNDVI(redArr, nirArr, invalidPixels)
+            meanNDVI = float(np.nanmean(ndviTest))
+
+            print(f"Successfully Fetched Sentinel Data for {farm.farmID} of date {snapDate} - Mean NDVI: {meanNDVI:.4f} | Valid Pixels: {np.sum(~np.isnan(ndviTest))}")
         except Exception as e:
             print(f"SentinelHub Download Failed on {snapDate}: {e}")
             continue
+    print(f"Download Complete. {successCount} successfull snapshots fetched.")
     return successCount > 0
     
 def smoothenTemporalNDVI(rawMeans: List[float], windowSize: int = 3) -> List[float]:

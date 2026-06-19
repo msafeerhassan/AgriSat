@@ -1,0 +1,46 @@
+{
+    "farmID": "FARM-0001",
+    "cropType": "Maize",
+    "geographical_bounds": {
+        "min_x": 73.338547,
+        "min_y": 30.399345,
+        "max_x": 73.349662,
+        "max_y": 30.402824
+    },
+    "temporalTrends": {
+        "assessment": "Stable Mainatainance",
+        "overall_slope": -0.018712459012328344,
+        "trend_vector": "Stable! (0.38 -> 0.35 -> 0.33 -> 0.30 -> 0.30 -> 0.29)"
+    },
+    "spatial_zones": {
+        "NW": {
+            "mean_ndvi": 0.3256144957958851,
+            "status": "Critical Condition!",
+            "active_pixels": 36,
+            "total_pixels": 49,
+            "coverage_pct": 73.46938775510205
+        },
+        "NE": {
+            "mean_ndvi": 0.276664295852716,
+            "status": "Critical Condition!",
+            "active_pixels": 42,
+            "total_pixels": 56,
+            "coverage_pct": 75.0
+        },
+        "SW": {
+            "mean_ndvi": 0.2735005178641419,
+            "status": "Critical Condition!",
+            "active_pixels": 42,
+            "total_pixels": 56,
+            "coverage_pct": 75.0
+        },
+        "SE": {
+            "mean_ndvi": 0.24615040944608374,
+            "status": "Critical Condition!",
+            "active_pixels": 49,
+            "total_pixels": 64,
+            "coverage_pct": 76.5625
+        }
+    },
+    "compiled_timestamp": "2026-06-19"
+}
