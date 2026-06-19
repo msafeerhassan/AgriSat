@@ -1,0 +1,46 @@
+{
+    "farmID": "Chaudhary Farms",
+    "cropType": "Maize",
+    "geographical_bounds": {
+        "min_x": 73.35508,
+        "min_y": 30.402505,
+        "max_x": 73.357869,
+        "max_y": 30.403009
+    },
+    "temporalTrends": {
+        "assessment": "Decline",
+        "overall_slope": -0.09100219830422848,
+        "trend_vector": "Downwards Growth (0.62 -> 0.60 -> 0.52 -> 0.35 -> 0.26 -> 0.22)"
+    },
+    "spatial_zones": {
+        "NW": {
+            "mean_ndvi": 0.31059718037271067,
+            "status": "Critical Condition!",
+            "active_pixels": 36,
+            "total_pixels": 49,
+            "coverage_pct": 73.46938775510205
+        },
+        "NE": {
+            "mean_ndvi": 0.18627375218462847,
+            "status": "Critical Condition!",
+            "active_pixels": 42,
+            "total_pixels": 56,
+            "coverage_pct": 75.0
+        },
+        "SW": {
+            "mean_ndvi": 0.25694003812124716,
+            "status": "Critical Condition!",
+            "active_pixels": 42,
+            "total_pixels": 56,
+            "coverage_pct": 75.0
+        },
+        "SE": {
+            "mean_ndvi": 0.15986889879628424,
+            "status": "Critical Condition!",
+            "active_pixels": 49,
+            "total_pixels": 64,
+            "coverage_pct": 76.5625
+        }
+    },
+    "compiled_timestamp": "2026-06-19"
+}

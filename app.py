@@ -25,6 +25,8 @@ from engine import (
     downloadAndRegisterSatelliteTelemetry
 )
 from dotenv import load_dotenv
+import warnings
+warnings.filterwarnings("ignore")
 
 load_dotenv()
 
@@ -135,14 +137,24 @@ if actionMode == "Active Farm Analytics Board":
                 centerLat = sum(lats) / len(lats)
                 centerLon = sum(lons) / len(lons)
 
+                mapKey = f"analytics_map_{farm.farmID}_{latestDateStr}_v3"
+
                 tileMap = folium.Map(location=[
                     centerLat,
                     centerLon
                 ],
                 zoom_start=15,
-                tiles="OpenStreetMap"
+                tiles=None,
+                control_scale=True
                 )
 
+                folium.TileLayer(
+                    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                    attr= 'Tiles &copy; Esri',
+                    name="Satellite Imagery",
+                    overlay=False,
+                    control=True
+                ).add_to(tileMap)
                 foliumPolyCoords = [[pt[1], pt[0]] for pt in farm.polygonCoords]
 
                 folium.Polygon(
@@ -153,30 +165,37 @@ if actionMode == "Active Farm Analytics Board":
                     popup=f"Farm ID: {farm.farmID}"
                 ).add_to(tileMap)
 
-                cleanNdvi = np.nan_to_num(ndviMatrix, nan=-0.1)
+                try:
 
-                upscaledNDvi = zoom(cleanNdvi, zoom=10, order=1)
+                    cleanNdvi = np.nan_to_num(ndviMatrix, nan=-0.1)
 
-                def colorAlphaScale(val):
-                    if val <= 0:
-                        return (0, 0, 0, 0)
-                    greenIntensity = int(max(0, min(255, val * 255)))
-                    return (34, greenIntensity, 34, int(0.75 * 255))
+                    upscaledNDvi = zoom(cleanNdvi, zoom=10, order=1)
                 
-                rgbaMatrix = np.zeros((upscaledNDvi.shape[0], upscaledNDvi.shape[1], 4), dtype=np.uint8)
-                for r in range(upscaledNDvi.shape[0]):
-                    for c in range(upscaledNDvi.shape[1]):
-                        rgbaMatrix[r, c] = colorAlphaScale(upscaledNDvi[r, c])
+                    rgbaMatrix = np.zeros((upscaledNDvi.shape[0], upscaledNDvi.shape[1], 4), dtype=np.uint8)
+                    rgbaMatrix[..., 0] = 34
+                    rgbaMatrix[..., 1] = np.clip((upscaledNDvi * 255).astype(int), 0, 255)
+                    rgbaMatrix[..., 2] = 34
+                    rgbaMatrix[..., 3] = np.where(upscaledNDvi > 0, 191, 0)
                 
-                minLon , minLat, maxLon, maxLat = farm.geoBoundary
+                    minLon , minLat, maxLon, maxLat = farm.geoBoundary
 
-                folium.raster_layers.ImageOverlay(
-                    image=rgbaMatrix,
-                    bounds=[[minLat, minLon], [maxLat, maxLon]],
-                    opacity=0.8
-                ).add_to(tileMap)
+                    folium.raster_layers.ImageOverlay(
+                        image=rgbaMatrix,
+                        bounds=[[minLat, minLon], [maxLat, maxLon]],
+                        opacity=0.75,
+                        interactive=True,
+                        z_index = 1
+                    ).add_to(tileMap)
+                except Exception as overlayErr:
+                    st.warning(f"Could Not render NDVI Overlay:", overlayErr)
+                st_folium(
+                    tileMap,
+                    width=550,
+                    height=380,
+                    key=mapKey
+                )
 
-                st_folium(tileMap, width=550, height=380, key=f"analytics_map_viewer_{farm.farmID}")
+                st.caption(f"Map Center: {centerLat:.4f}, {centerLon:.4f} | Bounds: {farm.geoBoundary}")
             with chartCol:
                 st.markdown("#### Crop Trend Forecasting Charts (Next 3 Cycles)")
 
@@ -250,7 +269,7 @@ elif actionMode == "Register & Draw New Farm Boundary":
     with col2:
         cropTypeInput = st.text_input("Enter the current Crop (Rice, Maize, Potatoes etc): ", "").strip()
 
-    mapCanvas = folium.Map(location=[30.3450, 73.3550], zoom_start=14, tiles="OpenStreetMap")
+    mapCanvas = folium.Map(location=[30.3450, 73.3550], zoom_start=14, tiles=None)
 
     drawPlugin = Draw(
         draw_options={
@@ -267,6 +286,14 @@ elif actionMode == "Register & Draw New Farm Boundary":
     )
 
     drawPlugin.add_to(mapCanvas)
+
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr= 'Tiles &copy;',
+        name="Satellite Imagery",
+        overlay=False,
+        control=True
+    ).add_to(mapCanvas)
 
     mapCaptureData = st_folium(mapCanvas, width=900, height=500, key="sketchpad_drawing_surface")
 
