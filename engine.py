@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Tuple, Dict, Optional
 import numpy as np
 from datetime import date
-import os, json, pickle, time
+import os, json, pickle, time, requests
 from datetime import timedelta
 import matplotlib.pyplot as plt
 from sentinelhub import SHConfig, SentinelHubRequest, DataCollection, BBox, CRS, MimeType, SentinelHubDownloadClient
@@ -418,20 +418,22 @@ def verifyLiveSentinelCredentials(clientID: str, clientSecret: str) -> Tuple[boo
         return False, "Credentials Missing"
     
     try:
-        config = SHConfig()
-        config.sh_client_id = clientID
-        config.sh_client_secret = clientSecret
-
-        client = SentinelHubDownloadClient(config=config)
-        client.get_json(
-            url="https://services.sentinel-hub.com/oauth/token",
-            post_values={
+        response = requests.post(
+            "https://services.sentinel-hub.com/oauth/token",
+            data={
                 "grant_type": "client_credentials",
                 "client_id": clientID,
                 "client_secret": clientSecret,
             },
+            timeout=10,
         )
-        return True, "Connected"
+
+        if response.status_code == 200:
+            return True, "Connected"
+        elif response.status_code in (400, 401):
+            return False, "Authentication Failed: Invalid Credentials"
+        else:
+            return False, f"Authentication Failed: HTTP {response.status_code}"
     except Exception as authErr:
         return False, f"Authentication Failed: {authErr}"
 
