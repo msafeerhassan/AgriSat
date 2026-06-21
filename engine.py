@@ -9,22 +9,9 @@ from sentinelhub import SHConfig, SentinelHubRequest, DataCollection, BBox, CRS,
 from shapely.geometry import box, Polygon, Point
 
 GRID_RESOLUTION: Tuple[int, int] = (15, 15)
-
-def fetchWithRetry(requestFn, maxAttempts: int = 3, baseDelaySeconds: float = 2.0):
-    lastError = None
-    for attempt in range(1, maxAttempts + 1):
-        try:
-            return requestFn()
-        except Exception as fetchErr:
-            lastError = fetchErr
-            if attempt < maxAttempts:
-                sleepFor = baseDelaySeconds * (2 ** (attempt - 1))
-                print(f"Attempt {attempt}/{maxAttempts} failed: {fetchErr}. Retrying in {sleepFor:.1f}s...")
-                time.sleep(sleepFor)
-            else:
-                print(f"ALL {maxAttempts} ATTEMPTS FAILED :(")
-    
-    raise lastError
+TARGET_METERS_PER_PIXEL: float = 25.0
+MAX_GRID_DIMENSION: int = 60
+MIN_GRID_DIMENSION: int = 5
 
 @dataclass
 class FarmWorkspace:
@@ -51,6 +38,39 @@ class FarmWorkspace:
         self.nIRbands[dateStr] = nIRBands
         self.cloudMask[dateStr] = cloudMask
 
+def computeAdaptiveGridResolution(farm: FarmWorkspace) -> Tuple[int, int]:
+    minLon, minLat, maxLon, maxLat = farm.geoBoundary
+
+    metersPerDegreeLat = 111_320.0
+    metersPerDegreeLon = 111_320.0 * np.cos(np.radians((minLat + maxLat) / 2.0))
+
+    widthMeters = (maxLon - minLon) * metersPerDegreeLon
+    heightMeters = (maxLat - minLat) * metersPerDegreeLat
+
+    widthPixels = int(np.ceil(widthMeters / TARGET_METERS_PER_PIXEL))
+    heightPixels = int(np.ceil(heightMeters / TARGET_METERS_PER_PIXEL))
+
+    widthPixels = int(np.clip(widthPixels, MIN_GRID_DIMENSION, MAX_GRID_DIMENSION))
+    heightPixels = int(np.clip(heightPixels, MIN_GRID_DIMENSION, MAX_GRID_DIMENSION))
+
+    return (widthPixels, heightPixels)
+def fetchWithRetry(requestFn, maxAttempts: int = 3, baseDelaySeconds: float = 2.0):
+    lastError = None
+    for attempt in range(1, maxAttempts + 1):
+        try:
+            return requestFn()
+        except Exception as fetchErr:
+            lastError = fetchErr
+            if attempt < maxAttempts:
+                sleepFor = baseDelaySeconds * (2 ** (attempt - 1))
+                print(f"Attempt {attempt}/{maxAttempts} failed: {fetchErr}. Retrying in {sleepFor:.1f}s...")
+                time.sleep(sleepFor)
+            else:
+                print(f"ALL {maxAttempts} ATTEMPTS FAILED :(")
+    
+    raise lastError
+
+
 def genSpectralBand(condition: str, bandType: str, shape: Tuple[int, int] = (10, 10)) -> np.ndarray:
     if condition.lower() == "healthy":
         redLow, redHigh = 0.05, 0.15
@@ -72,7 +92,7 @@ def genCloudMask(shape: Tuple[int, int] = (10, 10), coverageProb: float = 0.2) -
     return np.random.rand(*shape) < coverageProb
 
 def genPolygonRasterMask(farm: FarmWorkspace, targetShape: tuple[int, int]) -> np.ndarray:
-    height, width = targetShape
+    width, height = targetShape
     mask = np.zeros((height, width), dtype=bool)
 
     if not farm.polygonCoords:
@@ -457,7 +477,7 @@ def validateAndStandardizeBBox(bboxTuple: Tuple[float, float, float, float] , cr
         "area_deg_sq": spatialEnv.area
     }
 
-def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date, config: SHConfig, windowDays: int = 4) -> SentinelHubRequest:
+def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date, config: SHConfig, windowDays: int = 4, gridResolution: Tuple[int, int] = GRID_RESOLUTION) -> SentinelHubRequest:
     minLon, minLat, maxLon, maxLat = farm.geoBoundary
     
     sentinelBBox = BBox(bbox=[minLon, minLat, maxLon, maxLat], crs=CRS.WGS84)
@@ -507,7 +527,7 @@ def genSentinelNDVIReq(farm: FarmWorkspace, targetDate: date, config: SHConfig, 
             SentinelHubRequest.output_response('default', MimeType.TIFF)
         ],
         bbox=sentinelBBox,
-        size=GRID_RESOLUTION,
+        size=gridResolution,
         config=config
     )
 
@@ -537,8 +557,17 @@ def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, cl
     config.sh_client_id = clientID
     config.sh_client_secret = clientSecret
 
-    polyMask = genPolygonRasterMask(farm, GRID_RESOLUTION)
+    gridResolution = computeAdaptiveGridResolution(farm)
+    if farm.historicalDates:
+        existingDateStr = sorted(farm.historicalDates)[0].isoformat()
+        existingShape = farm.redBands[existingDateStr].shape
+        expectedShape = (gridResolution[1], gridResolution[0])
+        if existingShape != expectedShape:
+            print(f"Grid Resolution Mismatch for {farm.farmID}: existing data is {existingShape}")
+            gridResolution = (existingShape[1], existingShape[0])
+    polyMask = genPolygonRasterMask(farm, gridResolution)
     successCount = 0
+    print(f"Adaptive Grid Resolution for {farm.farmID}: {gridResolution[0]}x{gridResolution[1]} (target ~{TARGET_METERS_PER_PIXEL}m/pixel)")
     print(f"Starting data Download from Sentinel 2 for {farm.farmID}")
 
     lookBackDays = list(range(30, 0, -5))
@@ -546,8 +575,15 @@ def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, cl
     for lookBack in lookBackDays:
         snapDate = date.today() - timedelta(days=lookBack)
         dateStr = snapDate.isoformat()
+
+        if snapDate in farm.historicalDates:
+            perDateResults.append({
+                "date": dateStr,
+                "status": "already_have"
+            })
+            continue
         try:
-            request = genSentinelNDVIReq(farm, snapDate, config)
+            request = genSentinelNDVIReq(farm, snapDate, config, gridResolution=gridResolution)
             rawDataList = fetchWithRetry(lambda: request.get_data())
 
             if not rawDataList or len(rawDataList) == 0:
@@ -577,7 +613,7 @@ def downloadAndRegisterSatelliteTelemetry(farm: FarmWorkspace, clientID: str, cl
                     "status": "no_data"
                 })
                 continue
-            totalPixels = GRID_RESOLUTION[0] * GRID_RESOLUTION[1]
+            totalPixels = gridResolution[0] * gridResolution[1]
             cloudPct = float(np.sum(cloudPixels) / totalPixels)
             if cloudPct > 0.70:
                 print(f"Too Cloudy on {snapDate} ({cloudPct:.1%})")

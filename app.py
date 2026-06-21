@@ -63,16 +63,20 @@ elif authenticationStatus is None:
 
 st.sidebar.title(f"Welcome, {name}!")
 st.sidebar.markdown("### Satellite Gateway Status")
-with st.sidebar.spinner("Checking SentinelHub Connection..."):
-    clientID = os.getenv("CLIENT_ID")
-    clientSecret = os.getenv("CLIENT_SECRET")
 
-    connectionValidity, connectionMessage = verifyLiveSentinelCredentials(clientID, clientSecret)
+@st.cache_data(ttl=300 , show_spinner=False)
+def cachedSentinelCheck(clientID: str, clientSecret: str):
+    return verifyLiveSentinelCredentials(clientID, clientSecret)
 
-    if connectionValidity:
-        st.sidebar.success(f"SentinelHub API: {connectionMessage}")
-    else:
-        st.sidebar.error(f"SentinelHub API: {connectionMessage}")
+clientID = os.getenv("CLIENT_ID")
+clientSecret = os.getenv("CLIENT_SECRET")
+
+connectionValidity, connectionMessage = cachedSentinelCheck(clientID, clientSecret)
+
+if connectionValidity:
+    st.sidebar.success(f"SentinelHub API: {connectionMessage}")
+else:
+    st.sidebar.error(f"SentinelHub API: {connectionMessage}")
 
 st.sidebar.divider()
 
@@ -123,6 +127,54 @@ if actionMode == "Active Farm Analytics Board":
             with mCol3:
                 st.metric("Trend Trajectory State", trendRep.get("assessment", "Stable"))
 
+            updateCol1, updateCol2 = st.columns([3, 1])
+            with updateCol2:
+                updateNowClicked = st.button("Update Now", use_container_width = True)
+            if updateNowClicked:
+                with st.spinner(f"Checking for new satellite imagery for {farm.farmID}..."):
+                    clientID = os.getenv("CLIENT_ID")
+                    clientSecret = os.getenv("CLIENT_SECRET")
+
+                    updateResult = downloadAndRegisterSatelliteTelemetry(farm, clientID, clientSecret)
+
+                    newDatesFetched = sum(
+                        1 for entry in updateResult["perDate"] if entry["status"] == "fetched"
+                    )
+                    if newDatesFetched > 0:
+                        serializeFarmWorkspace(farm, storageDir=STORAGE_DIR)
+                        st.success(f"Added {newDatesFetched} new snapshots for {farm.farmID}")
+                    else:
+                        st.info("No new Satellite Data Available!")
+
+                    st.markdown("#### Update Summary")
+
+                    statusLabels = {
+                        "fetched": "Successfully Fetched",
+                        "too_cloudy": "Too Cloudy",
+                        "no_data": "No Data Available",
+                        "error": "Error :(",
+                        "already_have": "Already Have."
+                    }
+
+                    summaryRows = []
+
+                    for entry in updateResult["perDate"]:
+                        row = {
+                            "Date": entry["date"],
+                            "Status": statusLabels.get(entry["status"], entry["status"]),
+                        }
+
+                        if entry["status"] == "fetched":
+                            row["Mean NDVI"] = f"{entry["meanNDVI"]:.4f}"
+                            row["Cloud %"] = f"{entry["cloudPct"]:.1%}"
+                        elif entry["status"] == "too_cloudy":
+                            row["Cloud %"] = f"{entry["cloudPct"]:.1%}"
+                        elif entry["status"] == "error":
+                            row["Detail"] = entry["message"]
+                        summaryRows.append(row)
+                    st.dataframe(summaryRows, use_container_width = True)
+                if newDatesFetched > 0:
+                    st.rerun()
             st.divider()
 
             displayCol, chartCol = st.columns([1, 1])
@@ -344,7 +396,8 @@ elif actionMode == "Register & Draw New Farm Boundary":
                                 "fetched": "Fetched :)",
                                 "too_cloudy": "Too Cloudy :(",
                                 "no_data": "NO DATA :(",
-                                "error": "Error :("
+                                "error": "Error :(",
+                                "already_have": "Already Have"
                             }
 
                             summaryRows = []
