@@ -11,9 +11,9 @@ from scipy.ndimage import zoom
 import numpy as np
 from engine import (
     FarmWorkspace,
-    genPolygonRasterMask,
-    genSpectralBand,
-    genCloudMask,
+    # genPolygonRasterMask,
+    # genSpectralBand,
+    # genCloudMask,
     serializeFarmWorkspace,
     deserializeFarmWorkspace,
     calculateNDVI,
@@ -21,9 +21,10 @@ from engine import (
     genHistoricalRep,
     predictFutureNDVI,
     exportDetailedFarmReport,
-    verifySentinelCredentials,
+    # verifySentinelCredentials,
     downloadAndRegisterSatelliteTelemetry,
-    verifyLiveSentinelCredentials
+    verifyLiveSentinelCredentials,
+    excludeAnomolies
 )
 from dotenv import load_dotenv
 import warnings
@@ -105,7 +106,12 @@ if actionMode == "Active Farm Analytics Board":
         if farm and farm.historicalDates:
             st.subheader(f"Workspace Metrics Dashboard: {farm.farmID} - [{farm.cropType}]")
 
+            anomolyAlerts = excludeAnomolies(farm)
+            for alertMsg in anomolyAlerts:
+                st.error(f"{alertMsg}")
+            
             latestDateObj = sorted(farm.historicalDates)[-1]
+            
             latestDateStr = latestDateObj.isoformat()
 
             ndviMatrix = calculateNDVI(
@@ -242,20 +248,15 @@ if actionMode == "Active Farm Analytics Board":
                     tileMap,
                     width=550,
                     height=380,
-                    key=mapKey
+                    key=mapKey,
+                    returned_objects=[]
                 )
 
                 st.caption(f"Map Center: {centerLat:.4f}, {centerLon:.4f} | Bounds: {farm.geoBoundary}")
             with chartCol:
                 st.markdown("#### Crop Trend Forecasting Charts (Next 3 Cycles)")
 
-                sortedDates = sorted(farm.historicalDates)
-                historicalMeans = []
-                for d in sortedDates:
-                    dStr = d.isoformat()
-                    mNDVI = calculateNDVI(farm.redBands[dStr], farm.nIRbands[dStr], farm.cloudMask[dStr])
-                    historicalMeans.append(float(np.nanmean(mNDVI)) if not np.all(np.isnan(mNDVI)) else 0.0)
-
+                historicalMeans = trendRep["raw_means"]
                 predictions = predictFutureNDVI(historicalMeans, projectionSteps=3)
 
                 fig, ax = plt.subplots(figsize = (6, 4.2))

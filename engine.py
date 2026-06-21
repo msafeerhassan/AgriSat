@@ -357,16 +357,15 @@ def genHistoricalRep(farm: FarmWorkspace) -> Dict:
         return {
             "overall_slope": 0.0,
             "trend_vector": "Stable / Insufficient Data",
-            "assessment": "Stable"
+            "assessment": "Stable",
+            "raw_means": [],
+            "sorted_dates": []
         }
     
-    ndviMeans = []
+    meansTimeline = temporalTLSweeper(farm)
+    sortedDateStrs = sorted(meansTimeline.keys())
+    ndviMeans = [meansTimeline[d] for d in sortedDateStrs]
 
-    for d in farm.historicalDates:
-        dateStr = d.isoformat()
-        ndvi = calculateNDVI(farm.redBands[dateStr], farm.nIRbands[dateStr], farm.cloudMask[dateStr])
-        valid = ndvi[~np.isnan(ndvi)]
-        ndviMeans.append(float(np.mean(valid)) if valid.size > 0 else 0.0)
 
     cleanNDVIMeans = smoothenTemporalNDVI(ndviMeans, windowSize=3)
 
@@ -394,7 +393,9 @@ def genHistoricalRep(farm: FarmWorkspace) -> Dict:
     return {
         "overall_slope": float(slope),
         "trend_vector": trendVectorString,
-        'assessment': assessment
+        'assessment': assessment,
+        "raw_means": ndviMeans,
+        "sorted_dates": sortedDateStrs
     }
 
 def exportDetailedFarmReport(farm: FarmWorkspace, trendReport: dict, zonalReport: dict, outputDir: str = "outputReports") -> str:
