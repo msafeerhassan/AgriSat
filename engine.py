@@ -2,7 +2,8 @@ from dataclasses import dataclass, field
 from typing import List, Tuple, Dict, Optional
 import numpy as np
 from datetime import date
-import os, json, pickle, time, requests
+import os, json, pickle, time, requests, tempfile
+from filelock import FileLock
 from datetime import timedelta
 import matplotlib.pyplot as plt
 from sentinelhub import SHConfig, SentinelHubRequest, DataCollection, BBox, CRS, MimeType, SentinelHubDownloadClient
@@ -70,6 +71,20 @@ def fetchWithRetry(requestFn, maxAttempts: int = 3, baseDelaySeconds: float = 2.
     
     raise lastError
 
+def writeWithLock(targetPath: str, writeFn):
+    lockPath = targetPath + ".lock"
+
+    with FileLock(lockPath, timeout=30):
+        dirName = os.path.dirname(os.path.abspath(targetPath)) or "."
+        fd, tempPath = tempfile.mkstemp(dir=dirName, prefix=".tmp_", suffix=".part")
+        try:
+            with os.fdopen(fd, "wb") as tempFile:
+                writeFn(tempFile)
+            os.replace(tempPath, targetPath)
+        except Exception:
+            if os.path.exists(tempPath):
+                os.remove(tempPath)
+            raise
 
 def genSpectralBand(condition: str, bandType: str, shape: Tuple[int, int] = (10, 10)) -> np.ndarray:
     if condition.lower() == "healthy":
@@ -86,11 +101,9 @@ def genSpectralBand(condition: str, bandType: str, shape: Tuple[int, int] = (10,
     elif bandType.lower() == "nir":
         return np.random.uniform(nIRLow, nIRHigh, size=shape)
     else: 
-        raise ValueError("Band Type must be either RED or NIR(Near Infra-red)")
-    
+        raise ValueError("Band Type must be either RED or NIR(Near Infra-red)")   
 def genCloudMask(shape: Tuple[int, int] = (10, 10), coverageProb: float = 0.2) -> np.ndarray:
     return np.random.rand(*shape) < coverageProb
-
 def genPolygonRasterMask(farm: FarmWorkspace, targetShape: tuple[int, int]) -> np.ndarray:
     width, height = targetShape
     mask = np.zeros((height, width), dtype=bool)
@@ -118,7 +131,6 @@ def genPolygonRasterMask(farm: FarmWorkspace, targetShape: tuple[int, int]) -> n
     
     print(f"Polygon Mask Created: {np.sum(mask)}/{height*width} pixels inside boundary")
     return mask
-
 def calculateNDVI(redBand: np.ndarray, nIRBand: np.ndarray, cloudMask: np.ndarray) -> np.ndarray:
     ndviMatrix = np.full(redBand.shape, np.nan, dtype=float)
     validPixels = ~cloudMask
@@ -136,8 +148,6 @@ def calculateNDVI(redBand: np.ndarray, nIRBand: np.ndarray, cloudMask: np.ndarra
 
     ndviMatrix[validPixels] = computedNDVI
     return ndviMatrix
-
-
 def genCloudMaskFromSCL(sclArray: np.ndarray) -> np.ndarray:
     noDataPixels = (sclArray == 0)
     cloudPixels = (sclArray == 3) | (sclArray == 8) | (sclArray == 9) | (sclArray == 10)
@@ -173,17 +183,25 @@ def serializeFarmWorkspace(farm: FarmWorkspace, storageDir: str = "data_store"):
     }
 
     metaPath = os.path.join(storageDir, f"{farm.farmID}_meta.json")
-    with open(metaPath, "w") as f:
-        json.dump(metaData, f, indent=4)
+    def writeMeta(fileHandle):
+        fileHandle.write(json.dumps(metaData, indent=4).encode("utf-8"))
+    
+    writeWithLock(metaPath, writeMeta)
 
-    arrayPath = os.path.join(storageDir, f"{farm.farmID}_arrays.pkl")
+    arrayPath = os.path.join(storageDir, f"{farm.farmID}_arrays.npz")
 
-    with open(arrayPath, "wb") as f:
-        pickle.dump({
-            "redBands": farm.redBands,
-            "nirBands": farm.nIRbands,
-            "cloudMasks": farm.cloudMask
-        }, f)
+    arraysToSave = {}
+    for dateStr, arr in farm.redBands.items():
+        arraysToSave[f"red__{dateStr}"] = arr
+    for dateStr, arr in farm.nIRbands.items():
+        arraysToSave[f"nir__{dateStr}"] = arr
+    for dateStr, arr in farm.cloudMask.items():
+        arraysToSave[f"cloud__{dateStr}"] = arr
+
+    def writeArrays(fileHandle):
+        np.savez_compressed(fileHandle, **arraysToSave)
+    
+    writeWithLock(arrayPath, writeArrays)
 
 def temporalTLSweeper(farm: FarmWorkspace) -> Dict[str, float]:
     temporalMeans = {}
@@ -249,10 +267,12 @@ def exportNDVIHeatMap(farmID:str, targetDateStr: str, ndviMatrix:np.ndarray, out
 
 def deserializeFarmWorkspace(farmID: str, storageDir: str = "data_store") -> Optional[FarmWorkspace]:
     metaPath = os.path.join(storageDir, f"{farmID}_meta.json")
-    arrayPath = os.path.join(storageDir, f"{farmID}_arrays.pkl")
+    arrayPath = os.path.join(storageDir, f"{farmID}_arrays.npz")
+    picklePick = os.path.join(storageDir, f"{farmID}_arrays.pkl")
 
-    if not os.path.exists(metaPath) or not os.path.exists(arrayPath):
+    if not os.path.exists(metaPath):
         return None
+    
     with open(metaPath, "r") as file:
         metaData = json.load(file)
     
@@ -265,11 +285,25 @@ def deserializeFarmWorkspace(farmID: str, storageDir: str = "data_store") -> Opt
 
     farm.historicalDates = [date.fromisoformat(d) for d in metaData["historicalDates"]]
 
-    with open(arrayPath, "rb") as f:
-        arrays = pickle.load(f)
-        farm.redBands = arrays["redBands"]
-        farm.nIRbands = arrays["nirBands"]
-        farm.cloudMask = arrays["cloudMasks"]
+    if os.path.exists(arrayPath):
+        with np.load(arrayPath) as arrays:
+            for key in arrays.files:
+                kind, dateStr = key.split("__", 1)
+                if kind == "red":
+                    farm.redBands[dateStr] = arrays[key]
+                elif kind == "nir":
+                    farm.nIRbands[dateStr] = arrays[key]
+                elif kind == "cloud":
+                    farm.cloudMask[dateStr] = arrays[key]
+    elif os.path.exists(picklePick):
+        print(f"Loading Pickle Format for {farmID} - reSave to migrate to .npz")
+        with open (picklePick, "rb") as f:
+            arrays = pickle.load(f)
+            farm.redBands = arrays["redBands"]
+            farm.nIRbands = arrays["nirBands"]
+            farm.cloudMask = arrays["cloudMasks"]
+    else:
+        return None
     return farm
 
 def analyzeZSG(ndviMatrix: np.ndarray, targetedQuadrant: str = "ALL") -> dict:

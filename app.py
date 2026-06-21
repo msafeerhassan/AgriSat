@@ -129,7 +129,7 @@ if actionMode == "Active Farm Analytics Board":
 
             updateCol1, updateCol2 = st.columns([3, 1])
             with updateCol2:
-                updateNowClicked = st.button("Update Now", use_container_width = True)
+                updateNowClicked = st.button("Update Now", width='stretch')
             if updateNowClicked:
                 with st.spinner(f"Checking for new satellite imagery for {farm.farmID}..."):
                     clientID = os.getenv("CLIENT_ID")
@@ -172,7 +172,7 @@ if actionMode == "Active Farm Analytics Board":
                         elif entry["status"] == "error":
                             row["Detail"] = entry["message"]
                         summaryRows.append(row)
-                    st.dataframe(summaryRows, use_container_width = True)
+                    st.dataframe(summaryRows, width='stretch')
                 if newDatesFetched > 0:
                     st.rerun()
             st.divider()
@@ -415,4 +415,4 @@ elif actionMode == "Register & Draw New Farm Boundary":
                                 elif entry["status"] == "error":
                                     row["Detail"] = entry["message"]
                                 summaryRows.append(row)
-                            st.dataframe(summaryRows, use_container_width=True)
+                            st.dataframe(summaryRows, width='stretch')
