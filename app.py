@@ -6,7 +6,11 @@ from yaml.loader import SafeLoader
 import matplotlib.pyplot as plt
 import folium
 from folium.plugins import Draw
-from streamlit_folium import st_folium
+try:
+    from streamlit_folium import st_folium
+except ImportError:
+    def st_folium(*args, **kwargs):
+        return None
 from scipy.ndimage import zoom
 import numpy as np
 from engine import (
